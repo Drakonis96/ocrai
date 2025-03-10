@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="/backend/static/logo.png" alt="ocrAI Logo" width="350">
+  <img src="/backend/static/logo.png" alt="ocrAI Logo" width="250">
 </div>
 
 # ocrAI 🤖
