@@ -1,0 +1,9 @@
+Flask
+flask-cors
+pytesseract
+Pillow
+pdf2image
+google-genai
+openai
+mistralai
+beautifulsoup4

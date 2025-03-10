@@ -1,0 +1,11 @@
+services:
+  webapp:
+    build: .
+    container_name: ocrai
+    ports:
+      - "5015:5015"
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+      - ./backend/outputs:/app/backend/outputs
+    environment:
+      - GEMINI_API_KEY=your_api_key

@@ -1,0 +1,124 @@
+/* frontend/src/App.css */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+.app-container {
+  text-align: center;
+  padding: 20px;
+}
+
+/* Header: Logo and title centered */
+.app-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.logo-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.app-logo {
+  height: 100px; /* Aumenta el tamaño del logo */
+}
+
+.app-title {
+  margin-top: 10px;
+  font-size: 2em;
+  color: #333;
+}
+
+/* Navigation styling */
+.app-nav {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.tab-processing {
+  padding: 10px 20px;
+  border: none;
+  background-color: #ADD8E6;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.tab-default {
+  padding: 10px 20px;
+  border: none;
+  background-color: #ddd;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+/* Nueva regla para la pestaña TXT to PDF con color distinto (light purple) */
+.tab-txttopdf {
+  padding: 10px 20px;
+  border: none;
+  background-color: #dda0dd;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.app-nav button.active {
+  opacity: 0.8;
+}
+
+main {
+  margin-top: 20px;
+}
+
+/* Processed Files grouping and text wrapping */
+.file-group {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+}
+
+.file-group-title {
+  word-wrap: break-word;
+  margin: 0 0 10px 0;
+  font-weight: bold;
+}
+
+.file-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.button-download {
+  background-color: green;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.button-delete {
+  background-color: pink;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .app-header {
+    flex-direction: column;
+  }
+  .app-nav {
+    flex-direction: column;
+  }
+  .file-group {
+    width: 90%;
+  }
+}
