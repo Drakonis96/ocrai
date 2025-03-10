@@ -1,6 +1,6 @@
-<center>
-  <img src="logo.png" alt="ocrAI Logo" width="150">
-</center>
+<div align="center">
+  <img src="/backend/static/logo.png" alt="ocrAI Logo" width="150">
+</div>
 
 # ocrAI 🤖
 
