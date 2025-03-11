@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:16-alpine as frontend-build
+FROM node:16-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     tesseract-ocr \
     ghostscript \
+    qpdf \
+    unpaper \
+    libxml2 \
+    libxslt1.1 \
     libffi-dev \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
