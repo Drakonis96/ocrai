@@ -1,8 +1,19 @@
 # backend/models.py
 default_prompts = {
-    "ocr_correction": "Correct the following text. Begin your answer directly with the corrected text. Format the result as HTML, indicating where each page begins, each paragraph begins, and marking titles with the appropriate HTML tags (e.g., <h1>, <h2>, etc.).",
-    "ocr": "Perform OCR on the following document. Begin your answer directly with the OCR. Format the result as HTML, indicating where each page begins, each paragraph begins, and marking titles with the appropriate HTML tags (e.g., <h1>, <h2>, etc.).",
-    "translation": "Translate the following text to Spanish. Do not add any commentary; only output the translated text. Begin your answer directly with the translation. Format the result as HTML, indicating where each page begins, each paragraph begins, and marking titles with the appropriate HTML tags (e.g., <h1>, <h2>, etc.)."
+    # Prompt para corrección de HOCR (plugin OCRmyPDF)
+    "ocr_correction": (
+        "Automatically detect the language of the document. Correct only the text within <span class='ocrx_word'> elements in the following HOCR HTML. "
+        "Do not modify the structure, attributes, or positions. Return the corrected HOCR, changing only the text content of each word."
+    ),
+    # Prompt para OCR puro (IA) en markdown (ENGLISH)
+    "ocr": (
+        "Perform OCR on the provided image or PDF. Your response must start with the OCR result. Return the recognized text in markdown format, using headings (#), lists, bold, etc. Each page must start with a markdown heading '# Page X'. Do not add comments or any extra formatting outside of markdown."
+    ),
+    # Prompt para traducción en markdown (ENGLISH)
+    "translation": (
+        "Translate the following text to {target_language}. Your response must start with the translation. Return the translation in markdown format, using headings (#), lists, bold, etc. "
+        "Each page must start with a markdown heading '# Page X'. Do not add comments or any extra formatting outside of markdown."
+    )
 }
 
 custom_prompts = {}
@@ -22,7 +33,7 @@ def delete_prompt(key):
         return True
     return False
 
-# Solo se usará Gemini.
+# Añadimos soporte para Gemini en available_models
 available_models = {
     "Gemini": ["gemini-2.0-flash"]
 }

@@ -101,6 +101,28 @@ def embed_ocr_in_pdf(input_pdf, output_pdf):
     except Exception as e:
         return False
 
+def embed_ai_text_in_pdf(input_pdf: str, output_pdf: str) -> bool:
+    from pathlib import Path
+    backend_path = Path(__file__).parent
+    sidecar = Path(output_pdf).with_suffix('.txt')
+    import subprocess
+    import os
+    env = os.environ.copy()
+    env['PYTHONPATH'] = f"{backend_path}:{env.get('PYTHONPATH','')}"
+    try:
+        subprocess.run([
+            'ocrmypdf',
+            '--plugin', 'backend.my_ai_ocr_plugin',
+            '--pdf-renderer', 'hocr',
+            '--force-ocr',
+            '--sidecar', str(sidecar),
+            input_pdf, output_pdf
+        ], check=True, env=env)
+        return True
+    except subprocess.CalledProcessError as e:
+        print("OCRmyPDF failed:", e)
+        return False
+
 def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_cancelled):
     final_text = ""
     if file_path.lower().endswith(".pdf"):
@@ -111,21 +133,27 @@ def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_can
         total = len(pages)
         for i, page in enumerate(pages, start=1):
             if is_cancelled():
-                update_progress(0, "⏹️ Cancelled")
+                update_progress(0, "⏹️ Process cancelled")
                 return "Process cancelled."
             temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{uuid.uuid4().hex}.png")
             page.save(temp_filename, "PNG")
+            update_progress(int((i-1)/total*100), f"🔍 Processing page {i} of {total} (AI OCR)")
             page_text = call_api_ocr(api, model, temp_filename, prompt_key)
             final_text += f"[Page {i:04d}]\n{page_text}\n\n"
             os.remove(temp_filename)
             progress = int((i / total) * 100)
-            update_progress(progress, f"📄 Processed page {i} of {total}.")
+            update_progress(progress, f"✅ Page {i} of {total} processed (AI OCR)")
             time.sleep(1)
+        update_progress(100, "🎉 AI OCR completed")
         return final_text
     else:
+        update_progress(10, "🔍 Processing image with AI OCR")
         return call_api_ocr(api, model, file_path, prompt_key)
 
 def translate_file_by_pages(file_path, api, model, target_language, prompt_key, update_progress, is_cancelled):
+    """
+    Translates the file page by page, returning markdown with pagination.
+    """
     final_translation = ""
     if file_path.lower().endswith(".pdf"):
         try:
@@ -135,91 +163,90 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
         total = len(pages)
         for i, page in enumerate(pages, start=1):
             if is_cancelled():
-                update_progress(0, "⏹️ Cancelled")
+                update_progress(0, "⏹️ Process cancelled")
                 return "Process cancelled."
             temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{uuid.uuid4().hex}.png")
             page.save(temp_filename, "PNG")
+            update_progress(int((i-1)/total*100), f"🌐 Translating page {i} of {total}")
             page_text = pytesseract.image_to_string(page, lang='eng')
             translated_page = call_api_translation(api, model, page_text, target_language, prompt_key)
-            final_translation += f"[Page {i:04d}]\n{translated_page}\n\n"
+            final_translation += f"# Page {i}\n{translated_page}\n\n"
             os.remove(temp_filename)
             progress = int((i / total) * 100)
-            update_progress(progress, f"📄 Processed page {i} of {total}.")
+            update_progress(progress, f"✅ Page {i} of {total} translated")
             time.sleep(1)
+        update_progress(100, "🎉 Translation completed")
         return final_translation
     elif file_path.lower().endswith(".txt"):
+        update_progress(10, "🌐 Translating full TXT file")
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
         translated = call_api_translation(api, model, text, target_language, prompt_key)
-        update_progress(100, "🎉 Process completed")
-        return f"[Page {1:04d}]\n{translated}"
+        update_progress(100, "🎉 Translation completed")
+        return f"# Page 1\n{translated}"
     else:
         return "Unsupported file type for translation."
 
 def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled):
-    """
-    NOTA: Ahora solo usamos [Page XXXX] al inicio de cada página (por Tesseract).
-    """
     if is_cancelled():
-        update_progress(0, "⏹️ Cancelled")
+        update_progress(0, "⏹️ Process cancelled")
         return "Process cancelled."
-    update_progress(25, "📤 File uploaded.")
+    update_progress(10, "📤 File uploaded. Preparing processing...")
     base_name = os.path.splitext(os.path.basename(file_path))[0]
 
+    processed_text = ""
     if mode == "OCR":
+        update_progress(15, "🔍 Running OCR...")
         processed_text = run_tesseract(file_path)
         if is_cancelled():
-            update_progress(25, "⏹️ Cancelled")
+            update_progress(15, "⏹️ Process cancelled")
             return "Process cancelled."
         update_progress(50, "✅ Tesseract OCR completed.")
-        pdf_output = os.path.join(OUTPUT_FOLDER, base_name + "_ocr.pdf")
         if file_path.lower().endswith(".pdf"):
+            update_progress(60, "📝 Embedding OCR into PDF...")
+            pdf_output = os.path.join(OUTPUT_FOLDER, base_name + "_ocr.pdf")
             if embed_ocr_in_pdf(file_path, pdf_output):
-                update_progress(95, "📄 OCR embedded into PDF.")
+                update_progress(95, "📄 OCR successfully embedded in PDF.")
             else:
                 shutil.copy(file_path, pdf_output)
-                update_progress(95, "⚠️ Failed to embed OCR; original PDF copied.")
-        else:
-            shutil.copy(file_path, pdf_output)
-
+                update_progress(95, "⚠️ Could not embed OCR; original PDF copied.")
     elif mode == "OCR + AI":
-        processed_text = run_tesseract(file_path)
-        if is_cancelled():
-            update_progress(25, "⏹️ Cancelled")
-            return "Process cancelled."
-        update_progress(50, "✅ Tesseract OCR completed.")
-        processed_text = call_api_correction(api, model, processed_text, prompt_key)
-        pdf_output = os.path.join(OUTPUT_FOLDER, base_name + "_ocr.pdf")
+        update_progress(20, "🔍 Running Gemini OCR...")
+        tesseract_text = run_tesseract(file_path)
+        update_progress(35, "🤖 Correcting text with AI...")
+        processed_text = call_api_correction(api, model, tesseract_text, prompt_key="ocr_correction")
+        update_progress(50, "✅ Tesseract + AI completed.")
         if file_path.lower().endswith(".pdf"):
-            if embed_ocr_in_pdf(file_path, pdf_output):
-                update_progress(95, "📄 OCR embedded into PDF.")
+            update_progress(60, "📝 Embedding AI layer into PDF...")
+            pdf_output = os.path.join(OUTPUT_FOLDER, base_name + "_ocr.pdf")
+            if embed_ai_text_in_pdf(file_path, pdf_output):
+                sidecar_txt = os.path.splitext(pdf_output)[0] + ".txt"
+                if os.path.exists(sidecar_txt):
+                    try:
+                        os.remove(sidecar_txt)
+                    except Exception:
+                        pass
+                update_progress(95, "📄 AI layer successfully embedded in PDF.")
             else:
                 shutil.copy(file_path, pdf_output)
-                update_progress(95, "⚠️ Failed to embed OCR; original PDF copied.")
-        else:
-            shutil.copy(file_path, pdf_output)
-
+                update_progress(95, "⚠️ Could not embed AI; original PDF copied.")
     elif mode == "AI":
-        update_progress(25, "📂 File ready for full AI processing.")
-        if file_path.lower().endswith(".pdf"):
-            processed_text = ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_cancelled)
-        else:
-            processed_text = call_api_ocr(api, model, file_path, prompt_key)
-
+        update_progress(20, "📂 File ready for full Gemini processing...")
+        processed_text = call_api_ocr(api, model, file_path, prompt_key)
     else:
         processed_text = "Unrecognized processing mode."
         update_progress(25, "❌ Error: Unrecognized mode.")
 
     if is_cancelled():
-        update_progress(75, "⏹️ Cancelled")
+        update_progress(75, "⏹️ Process cancelled")
         return "Process cancelled."
 
-    update_progress(75, "🤖 API processing completed.")
+    update_progress(98, "📝 Saving results and finishing up...")
 
-    # Guardar el TXT final
-    txt_file = os.path.join(OUTPUT_FOLDER, base_name + ".txt")
-    with open(txt_file, "w", encoding="utf-8") as f:
-        f.write(processed_text)
+    if mode == "AI" and processed_text and processed_text.strip() and not processed_text.strip().startswith("❌") and processed_text.strip() != "Process cancelled.":
+        txt_file = os.path.join(OUTPUT_FOLDER, base_name + ".txt")
+        with open(txt_file, "w", encoding="utf-8") as f:
+            f.write(processed_text)
 
     update_progress(100, "🎉 Process completed")
     return processed_text
@@ -278,16 +305,41 @@ def organize_paragraphs(text):
             paragraphs.append(new_block.strip())
     return paragraphs
 
+def convert_markdown_to_flowables(markdown_text, styles, header_styles, normal_style, max_chars_per_page=1800):
+    """
+    Convierte un bloque de Markdown en una lista de flowables para ReportLab.
+    Inserta un salto de página si el texto sobrepasa max_chars_per_page.
+    """
+    import markdown
+    from bs4 import BeautifulSoup
+    html = markdown.markdown(markdown_text)
+    soup = BeautifulSoup(html, "html.parser")
+    flowables = []
+    char_count = 0
+    for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'ul', 'ol', 'li']):
+        if element.name in header_styles:
+            style = header_styles[element.name]
+        else:
+            style = normal_style
+        text_content = element.get_text().strip()
+        if text_content:
+            char_count += len(text_content)
+            flowables.append(Paragraph(text_content, style))
+            flowables.append(Spacer(1, 12))
+            if char_count > max_chars_per_page:
+                flowables.append(PageBreak())
+                char_count = 0
+    return flowables
+
 def convert_txt_to_pdf(txt_file_path):
     """
-    Convierte un archivo TXT a PDF siguiendo estas reglas:
-      - Se detecta el patrón [Page XXXX] para separar páginas (solo al inicio).
-      - Este marcador se convierte en un encabezado (h1).
-      - Si el contenido proviene de un bloque markdown con ```html se elimina ese marcador y
-        se parsea con BeautifulSoup para generar párrafos independientes.
-      - Para contenido en texto plano se organiza en párrafos con organize_paragraphs.
-      - Se inserta un PageBreak después de cada bloque de página.
+    Convierte un archivo TXT a PDF usando Markdown:
+      - Cada bloque de texto asociado a una imagen/página se convierte a Markdown.
+      - Si el texto sobrepasa el tamaño de una página, se inserta un salto de página.
+      - No se incluyen encabezados como "page 1", "page 2", etc.
     """
+    import markdown
+    from bs4 import BeautifulSoup
     with open(txt_file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -316,54 +368,30 @@ def convert_txt_to_pdf(txt_file_path):
         leftIndent=20
     )
 
-    flowables = []
-    # Patrón para detectar el marcador [Page XXXX]
+    # Separar por bloques de página si existen (por ejemplo, si el OCR los deja)
+    # Si no, tratar todo el contenido como un solo bloque
     page_pattern = re.compile(r'\[Page\s+\d{4}\]')
     parts = re.split(r'(\[Page\s+\d{4}\])', content)
-    first_page_encountered = False
+    # Si no hay partes, usar el contenido completo
+    if len(parts) <= 1:
+        blocks = [content]
+    else:
+        # Quitar los marcadores de página y dejar solo el texto
+        blocks = []
+        for part in parts:
+            if not page_pattern.fullmatch(part):
+                blocks.append(part.strip())
 
-    for part in parts:
-        part = part.strip()
-        if not part:
+    flowables = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
             continue
-
-        if page_pattern.fullmatch(part):
-            if first_page_encountered:
-                flowables.append(PageBreak())
-            else:
-                first_page_encountered = True
-            header_para = Paragraph(part, styles['Heading1'])
-            flowables.append(header_para)
-            flowables.append(Spacer(1, 12))
-        else:
-            if part.startswith("```"):
-                lines = part.splitlines()
-                if lines and lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                part = "\n".join(lines)
-            # Si parece HTML, se procesa para separar cada etiqueta de interés
-            if re.search(r'<\s*html', part, re.IGNORECASE) or re.search(r'<\s*(p|h[1-6])', part, re.IGNORECASE):
-                if not part.lower().startswith("<html"):
-                    part = "<html>" + part + "</html>"
-                soup = BeautifulSoup(part, "html.parser")
-                for element in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p']):
-                    if element.name.lower() in ["h1", "h2", "h3", "h4", "h5", "h6"]:
-                        style = header_styles.get(element.name.lower(), styles['Heading1'])
-                    else:
-                        style = normal_style
-                    text_content = element.get_text().strip()
-                    if text_content:
-                        flowables.append(Paragraph(text_content, style))
-                        flowables.append(Spacer(1, 12))
-            else:
-                # Texto plano -> organizar en párrafos
-                paragraphs = organize_paragraphs(part)
-                for para_text in paragraphs:
-                    if para_text:
-                        flowables.append(Paragraph(para_text, normal_style))
-                        flowables.append(Spacer(1, 12))
-
+        # Convertir el bloque a flowables usando Markdown
+        flowables.extend(convert_markdown_to_flowables(block, styles, header_styles, normal_style))
+        # Se insertará un salto de página si el bloque es muy grande (la función lo gestiona)
+        flowables.append(PageBreak())
+    if flowables and isinstance(flowables[-1], PageBreak):
+        flowables = flowables[:-1]  # No dejar salto de página al final
     doc.build(flowables)
     return output_pdf

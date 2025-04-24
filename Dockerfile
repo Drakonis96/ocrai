@@ -24,9 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install OCRmyPDF
-RUN pip install --no-cache-dir ocrmypdf
-
 # Copy backend code
 COPY backend/ /app/backend/
 
@@ -35,6 +32,7 @@ COPY --from=frontend-build /app/frontend/build/ /app/backend/static/
 
 # Set working directory to backend and install Python dependencies
 WORKDIR /app/backend
+ENV PYTHONPATH=/app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

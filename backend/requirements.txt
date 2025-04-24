@@ -7,3 +7,6 @@ google-genai
 openai
 mistralai
 beautifulsoup4
+ocrmypdf>=15.0
+pluggy>=1.4
+markdown

@@ -1,6 +1,6 @@
 services:
   ocrai:
-    image: drakonis96/ocrai:latest
+    build: .
     container_name: ocrai
     ports:
       - "5015:5015"

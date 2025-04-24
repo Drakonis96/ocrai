@@ -4,33 +4,46 @@
 
 # ocrAI 🤖
 
-ocrAI is a unified web application that combines Optical Character Recognition (OCR) and Artificial Intelligence (AI) to process and translate documents, offering a simple, intuitive interface with real-time feedback (even with emojis!).
+---
+
+🆕 **Enhanced OCR + AI Mode:**
+The AI-corrected text is now embedded directly into the PDF, preserving the original layout and positioning within the document.
+
+📄 **New Output Format in Full AI OCR Mode:**
+The output is now a Markdown-formatted .txt file, structured with titles, subtitles, and page markers.
+This file can be converted directly within the app to a clean, paginated PDF, making it ideal for tasks like translating books while preserving formatting and pagination.
+
+---
+
+ocrAI is a simple web app that combines Optical Character Recognition (OCR) and Artificial Intelligence (AI) to process and translate documents. It offers an intuitive interface with real-time feedback and emoji progress.
 
 ## Key Features
 
 - **File Management** 📤  
-  - Upload PDF or image files using drag & drop or manual selection.
+  - Upload PDF or image files easily.
   - Files are saved with unique names to avoid overwrites.
-  - The "Delete All Files" button removes all files from both the "uploads" and "outputs" folders.
+  - Delete all files with one click (removes from both uploads and outputs).
 
 - **OCR Processing Modes** 🔍  
   - **OCR (Tesseract Only):**  
     Extracts text with Tesseract and embeds it into the PDF using OCRmyPDF. The TXT file contains the raw OCR output.
   - **OCR + AI (Tesseract + AI):**  
-    Uses Tesseract to extract text and then sends it to an AI model (e.g., Gemini) to correct and format the content. The TXT file shows the corrected and structured text, while the PDF retains the original Tesseract output.
+    Uses Tesseract to extract text, then sends it to Gemini AI for correction and formatting. The corrected text is embedded directly into the resulting PDF, and a TXT file is also generated.
   - **AI (Full AI OCR):**  
-    Leverages the AI model's OCR capabilities to process the document page by page. The TXT file includes clear page markers, making it easy to compare with the original document, and the original PDF is preserved.
-  - All modes display real-time progress updates with emojis (e.g., 📤, ✅, 🤖, 🎉) and run in the background.
+    Uses Gemini AI to process the document page by page. Generates a TXT file in markdown format (with page markers and structure). This TXT can be converted to a PDF using the **TXT to PDF** tool in the app.
+  - All modes show real-time progress with emojis and run in the background.
+
+- **TXT to PDF** 📝  
+  - Convert any TXT file (especially markdown from AI mode) to a clean, paginated PDF directly from the app.
 
 - **Translation** 🌐  
-  - Translates PDF or TXT documents page by page.
-  - You can upload a new file or select one from the list of processed files.
+  - Translate PDF or TXT documents page by page.
   - Progress updates are displayed, and a TXT file with the final translation (including page markers) is generated.
 
 - **Configuration** ⚙️  
-  - Manage and add new AI models (including the ability to add or delete Gemini models) and languages.
-  - Update or add custom prompts for OCR, correction, and translation functions.
-  - Download or upload the complete configuration (which includes prompts and models).
+  - Manage and add new Gemini AI models and languages.
+  - Update or add custom prompts for OCR, correction, and translation.
+  - Download or upload the complete configuration (prompts and models).
 
 ## How to Use the Application
 
@@ -39,10 +52,11 @@ ocrAI is a unified web application that combines Optical Character Recognition (
    - Select your file (PDF or image).
    - Choose one of the processing modes:
      - **OCR** (Tesseract Only)
-     - **OCR + AI** (Tesseract + AI for correction)
-     - **AI** (Full AI OCR)
-   - Select the desired prompt.
+     - **OCR + AI** (Tesseract + AI for correction and AI-embedded PDF)
+     - **AI** (Full AI OCR, generates markdown TXT)
+   - For AI modes, select the desired prompt.
    - Click **Upload and process** and watch the real-time progress.
+   - If you used **AI** mode, you can convert the resulting TXT to PDF using the **TXT to PDF** tab.
 
 2. **Translate Documents:**
    - Go to the **Translation** tab.
@@ -55,11 +69,18 @@ ocrAI is a unified web application that combines Optical Character Recognition (
    - Go to the **Processed Files** tab.
    - Download or delete files (with confirmation prompts).
 
+   **Note:** The Processed Files list is ordered from most recent to oldest (top = newest).
+
 4. **Configure the Application:**
    - Go to the **Configurations** tab.
    - Add, edit, or delete custom prompts.
    - Manage Gemini models: add new models or delete existing ones.
    - Configure languages and download or upload the complete configuration.
+
+5. **Convert TXT to PDF:**
+   - Go to the **TXT to PDF** tab.
+   - Select a TXT file (for example, one generated by AI mode).
+   - Click **Convert to PDF** to get a clean, paginated PDF.
 
 ## How to Run ocrAI
 
@@ -71,11 +92,15 @@ ocrAI is a unified web application that combines Optical Character Recognition (
 
 ```bash
 docker-compose up --build
+```
+
 Then, open your browser at http://localhost:5015 to start using ocrAI.
 
-Technologies Used
-Frontend: React, Axios
-Backend: Flask, Python
-OCR: Tesseract, pdf2image, OCRmyPDF
-AI: OpenAI, Gemini, Mistral APIs
+---
+
+**Technologies Used**  
+Frontend: React, Axios  
+Backend: Flask, Python  
+OCR: Tesseract, pdf2image, OCRmyPDF  
+AI: Gemini API  
 Containerization: Docker, Docker Compose

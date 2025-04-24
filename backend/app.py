@@ -164,6 +164,9 @@ def update_prompts_endpoint():
 
 @app.route('/api/prompts/<key>', methods=['DELETE'])
 def delete_prompt_endpoint(key):
+    # No permitir eliminar el prompt 'ocr_correction'
+    if key == "ocr_correction":
+        return jsonify({"error": "The 'ocr_correction' prompt cannot be deleted."}), 403
     if delete_prompt(key):
         return jsonify({"message": f"Prompt '{key}' deleted."})
     else:

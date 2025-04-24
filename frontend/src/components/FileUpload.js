@@ -6,8 +6,16 @@ import ModelSelector from './ModelSelector';
 
 const API_URL = '/api';
 
+const DEFAULT_LANGUAGES = [
+  'Spanish',
+  'English',
+  'French',
+  'Italian',
+  'German',
+  'Portuguese'
+];
+
 function FileUpload({ onJobCompleted }) {
-  // Se establece la API por defecto en "Gemini"
   const [file, setFile] = useState(null);
   const [api, setApi] = useState('Gemini');
   const [model, setModel] = useState('');
@@ -18,8 +26,11 @@ function FileUpload({ onJobCompleted }) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [message, setMessage] = useState('');
   const [jobId, setJobId] = useState(null);
+  const [targetLanguage, setTargetLanguage] = useState(DEFAULT_LANGUAGES[0]);
+  const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
 
-  // No se ofrece opción para seleccionar otra API ya que sólo se usa Gemini.
+  const apis = ['Gemini'];
+
   useEffect(() => {
     axios.get(`${API_URL}/models`, { params: { api } })
       .then(response => {
@@ -29,6 +40,13 @@ function FileUpload({ onJobCompleted }) {
         }
       })
       .catch(err => console.error(err));
+    // Fetch available languages from backend
+    axios.get(`${API_URL}/languages`).then(res => {
+      if (res.data.languages && res.data.languages.length > 0) {
+        setAvailableLanguages(res.data.languages);
+        setTargetLanguage(res.data.languages[0]);
+      }
+    }).catch(() => {});
   }, [api]);
 
   useEffect(() => {
@@ -86,20 +104,24 @@ function FileUpload({ onJobCompleted }) {
       setMessage("⚠️ Please select a file.");
       return;
     }
-    if (mode === "OCR") {
-      setPromptKey('');
-    } else if (!promptKey) {
+    // Si el modo es OCR + AI, forzar el prompt a 'ocr_correction'
+    let promptToSend = promptKey;
+    if (mode === "OCR + AI") {
+      promptToSend = "ocr_correction";
+    } else if (mode !== "OCR" && !promptKey) {
       setMessage("⚠️ Please select a prompt.");
       return;
     }
     setMessage("🚀 Uploading file...");
     const formData = new FormData();
     formData.append("file", file);
-    // La API siempre es "Gemini"
     formData.append("api", api);
     formData.append("model", model);
     formData.append("mode", mode);
-    formData.append("prompt_key", promptKey);
+    formData.append("prompt_key", promptToSend);
+    if (mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') {
+      formData.append("target_language", targetLanguage);
+    }
 
     axios.post(`${API_URL}/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } })
       .then(response => {
@@ -115,6 +137,17 @@ function FileUpload({ onJobCompleted }) {
   return (
     <div>
       <form onSubmit={handleSubmit} className="upload-form">
+        {/* API Selector */}
+        <div style={{ marginBottom: '10px' }}>
+          <label>
+            API:
+            <select value={api} onChange={e => setApi(e.target.value)} style={{ marginLeft: '10px' }}>
+              {apis.map(a => (
+                <option key={a} value={a}>{a}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div
           className="drop-zone"
           onDrop={handleDrop}
@@ -131,8 +164,7 @@ function FileUpload({ onJobCompleted }) {
           <label htmlFor="fileInput" style={{ cursor: 'pointer', color: 'blue' }}>Select file</label>
         </div>
         <div className="selectors" style={{ marginBottom: '10px' }}>
-          {/* No se muestra opción de seleccionar otra API */}
-          <ModelSelector models={models} selectedModel={model} setSelectedModel={setModel} />
+          <ModelSelector models={models} selectedModel={model} setSelectedModel={setModel} selectedApi={api} />
         </div>
         <div className="mode-selector" style={{ marginBottom: '10px' }}>
           <p>Processing mode:</p>
@@ -163,12 +195,12 @@ function FileUpload({ onJobCompleted }) {
         </div>
         <div className="prompt-selector" style={{ marginBottom: '10px' }}>
           <label>
-            {mode === "OCR" ? "Prompt not required for OCR mode" : "Select Prompt:"}
+            {mode === "OCR" ? "Prompt not required for OCR mode" : mode === "OCR + AI" ? "Prompt is fixed for OCR + AI" : "Select Prompt:"}
             <select
               value={promptKey}
               onChange={(e) => setPromptKey(e.target.value)}
               style={{ marginLeft: '10px' }}
-              disabled={mode === "OCR"}
+              disabled={mode === "OCR" || mode === "OCR + AI"}
             >
               <option value="">-- Select Prompt --</option>
               {Object.keys(availablePrompts).map(key => (
@@ -177,6 +209,23 @@ function FileUpload({ onJobCompleted }) {
             </select>
           </label>
         </div>
+        {/* Target language selector for translation */}
+        {(mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') && (
+          <div className="target-language-selector" style={{ marginBottom: '10px' }}>
+            <label>
+              Target language:
+              <select
+                value={targetLanguage}
+                onChange={e => setTargetLanguage(e.target.value)}
+                style={{ marginLeft: '10px' }}
+              >
+                {availableLanguages.map(lang => (
+                  <option key={lang} value={lang}>{lang}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         <button type="submit">Upload and process</button>
         {jobId && (
           <button type="button" onClick={handleStop} style={{ marginLeft: '10px' }}>
@@ -186,8 +235,7 @@ function FileUpload({ onJobCompleted }) {
       </form>
       {jobId && (
         <div>
-          <ProgressBar progress={uploadProgress} />
-          <p>{message}</p>
+          <ProgressBar progress={uploadProgress} status={message} />
         </div>
       )}
       {!jobId && <p>{message}</p>}

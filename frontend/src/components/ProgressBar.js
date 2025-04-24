@@ -1,7 +1,7 @@
 // frontend/src/components/ProgressBar.js
 import React from 'react';
 
-function ProgressBar({ progress }) {
+function ProgressBar({ progress, status }) {
   const containerStyle = {
     height: '20px',
     width: '100%',
@@ -26,10 +26,17 @@ function ProgressBar({ progress }) {
   };
 
   return (
-    <div style={containerStyle}>
-      <div style={fillerStyle}>
-        <span style={labelStyle}>{`${progress}%`}</span>
+    <div>
+      <div style={containerStyle}>
+        <div style={fillerStyle}>
+          <span style={labelStyle}>{`${progress}%`}</span>
+        </div>
       </div>
+      {status && (
+        <div style={{ marginTop: '5px', textAlign: 'center', fontWeight: 'bold', color: '#333' }}>
+          {status}
+        </div>
+      )}
     </div>
   );
 }
