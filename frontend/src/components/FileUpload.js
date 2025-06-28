@@ -29,6 +29,14 @@ function FileUpload({ onJobCompleted }) {
   const [targetLanguage, setTargetLanguage] = useState(DEFAULT_LANGUAGES[0]);
   const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
 
+  // Compression options
+  const [compress, setCompress] = useState(false);
+  const [targetDPI, setTargetDPI] = useState(150);
+  const [imgFormat, setImgFormat] = useState('jpeg');
+  const [quality, setQuality] = useState(85);
+  const [keepOriginalImages, setKeepOriginalImages] = useState(false);
+  const [preserveMetadata, setPreserveMetadata] = useState(false);
+
   const apis = ['Gemini'];
 
   useEffect(() => {
@@ -121,6 +129,14 @@ function FileUpload({ onJobCompleted }) {
     formData.append("prompt_key", promptToSend);
     if (mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') {
       formData.append("target_language", targetLanguage);
+    }
+    if (compress) {
+      formData.append('compress', 'true');
+      formData.append('target_dpi', targetDPI);
+      formData.append('format', imgFormat);
+      formData.append('quality', quality);
+      formData.append('keep_original', keepOriginalImages);
+      formData.append('preserve_metadata', preserveMetadata);
     }
 
     axios.post(`${API_URL}/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } })
@@ -226,6 +242,70 @@ function FileUpload({ onJobCompleted }) {
             </label>
           </div>
         )}
+        {/* Image compression options */}
+        <div className="compression" style={{ marginBottom: '10px' }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={compress}
+              onChange={e => setCompress(e.target.checked)}
+            />{' '}
+            Enable image compression
+          </label>
+          {compress && (
+            <div style={{ marginTop: '10px' }}>
+              <label>
+                targetDPI:
+                <input
+                  type="number"
+                  min="72"
+                  max="300"
+                  value={targetDPI}
+                  onChange={e => setTargetDPI(e.target.value)}
+                  style={{ marginLeft: '10px', width: '80px' }}
+                />
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                format:
+                <select
+                  value={imgFormat}
+                  onChange={e => setImgFormat(e.target.value)}
+                  style={{ marginLeft: '10px' }}
+                >
+                  <option value="jpeg">jpeg</option>
+                  <option value="png">png</option>
+                </select>
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                quality:
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={quality}
+                  onChange={e => setQuality(e.target.value)}
+                  style={{ marginLeft: '10px', width: '60px' }}
+                />
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                <input
+                  type="checkbox"
+                  checked={keepOriginalImages}
+                  onChange={e => setKeepOriginalImages(e.target.checked)}
+                />{' '}
+                keepOriginalImages
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                <input
+                  type="checkbox"
+                  checked={preserveMetadata}
+                  onChange={e => setPreserveMetadata(e.target.checked)}
+                />{' '}
+                preserveMetadata
+              </label>
+            </div>
+          )}
+        </div>
         <button type="submit">Upload and process</button>
         {jobId && (
           <button type="button" onClick={handleStop} style={{ marginLeft: '10px' }}>

@@ -1,12 +1,23 @@
 /* frontend/src/App.css */
+:root {
+  --primary-color: #3f51b5;
+  --secondary-color: #f50057;
+  --background-color: #f4f7fb;
+  --text-color: #333;
+}
+
 body {
   margin: 0;
-  font-family: Arial, sans-serif;
+  font-family: 'Roboto', sans-serif;
+  background: var(--background-color);
+  color: var(--text-color);
 }
 
 .app-container {
   text-align: center;
   padding: 20px;
+  max-width: 1000px;
+  margin: 0 auto;
 }
 
 /* Header: Logo and title centered */
@@ -19,10 +30,11 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 10px;
 }
 
 .app-logo {
-  height: 100px; /* Aumenta el tamaño del logo */
+  height: 100px; /* Increase logo size */
 }
 
 .app-title {
@@ -37,35 +49,53 @@ body {
   display: flex;
   justify-content: center;
   gap: 10px;
+  background: #fff;
+  padding: 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.app-nav button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 20px;
+  color: #fff;
+  cursor: pointer;
+  transition: background-color 0.3s, transform 0.3s;
 }
 
 .tab-processing {
-  padding: 10px 20px;
-  border: none;
-  background-color: #ADD8E6;
-  cursor: pointer;
-  border-radius: 5px;
+  background-color: var(--primary-color);
 }
 
 .tab-default {
-  padding: 10px 20px;
-  border: none;
-  background-color: #ddd;
-  cursor: pointer;
-  border-radius: 5px;
+  background-color: #6c757d;
 }
 
-/* Nueva regla para la pestaña TXT to PDF con color distinto (light purple) */
 .tab-txttopdf {
-  padding: 10px 20px;
-  border: none;
-  background-color: #dda0dd;
-  cursor: pointer;
-  border-radius: 5px;
+  background-color: var(--secondary-color);
 }
 
 .app-nav button.active {
-  opacity: 0.8;
+  filter: brightness(1.1);
+}
+
+.app-nav button:hover {
+  transform: translateY(-2px);
+}
+
+.upload-form {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  text-align: left;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.upload-form label {
+  font-weight: 500;
 }
 
 main {
@@ -74,10 +104,12 @@ main {
 
 /* Processed Files grouping and text wrapping */
 .file-group {
-  border: 1px solid #ccc;
+  border: 1px solid #e0e0e0;
   border-radius: 8px;
   margin-bottom: 10px;
   padding: 10px;
+  background: #fff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
 .file-group-title {
@@ -93,7 +125,7 @@ main {
 }
 
 .button-download {
-  background-color: green;
+  background-color: var(--primary-color);
   color: white;
   border: none;
   padding: 5px 10px;
@@ -102,7 +134,7 @@ main {
 }
 
 .button-delete {
-  background-color: pink;
+  background-color: var(--secondary-color);
   color: white;
   border: none;
   padding: 5px 10px;
@@ -117,8 +149,12 @@ main {
   }
   .app-nav {
     flex-direction: column;
+    gap: 5px;
   }
   .file-group {
     width: 90%;
+  }
+  .upload-form {
+    padding: 15px;
   }
 }

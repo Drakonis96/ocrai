@@ -29,12 +29,13 @@ def update_progress(job_id, progress, status):
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
 
-def run_processing(job_id, file_path, api, model, mode, prompt_key):
+def run_processing(job_id, file_path, api, model, mode, prompt_key, compression):
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
             update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
-            is_cancelled=lambda: is_cancelled(job_id)
+            is_cancelled=lambda: is_cancelled(job_id),
+            compression=compression
         )
         active_jobs[job_id]["result"] = result
         update_progress(job_id, 100, "🎉 Process completed")
@@ -78,10 +79,19 @@ def upload_file():
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(file_path)
 
+    compression = {
+        "enabled": request.form.get('compress', 'false').lower() == 'true',
+        "target_dpi": int(request.form.get('target_dpi', 150)),
+        "format": request.form.get('format', 'jpeg'),
+        "quality": int(request.form.get('quality', 85)),
+        "keep_original": request.form.get('keep_original', 'false').lower() == 'true',
+        "preserve_metadata": request.form.get('preserve_metadata', 'false').lower() == 'true'
+    }
+
     job_id = str(uuid.uuid4())
     active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None}
 
-    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key))
+    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression))
     thread.start()
 
     return jsonify({"message": "File uploaded, processing started", "job_id": job_id})
