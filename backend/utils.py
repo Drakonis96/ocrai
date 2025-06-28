@@ -137,6 +137,17 @@ def compress_pdf_images(input_pdf, output_pdf, target_dpi=150, fmt='jpeg', quali
         for name, img in page.images.items():
             pdf_img = PdfImage(img)
             pil_img = pdf_img.as_pil_image()
+
+            # Downsample image to target DPI if higher
+            orig_dpi = pil_img.info.get('dpi', (72, 72))[0]
+            if orig_dpi > target_dpi:
+                scale = target_dpi / orig_dpi
+                new_size = (
+                    max(1, int(pil_img.width * scale)),
+                    max(1, int(pil_img.height * scale))
+                )
+                pil_img = pil_img.resize(new_size, Image.LANCZOS)
+
             if not preserve_metadata and 'exif' in pil_img.info:
                 pil_img.info.pop('exif')
 
