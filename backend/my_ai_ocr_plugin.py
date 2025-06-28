@@ -34,7 +34,15 @@ def _correct_hocr_with_ai(hocr_html: str, prompt_key="ocr_correction",
     from google import genai
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     rsp = client.models.generate_content(model=model, contents=[prompt])
-    corrected = [w.strip() for w in rsp.text.splitlines() if w.strip()]
+    import re
+    corrected = []
+    for w in rsp.text.splitlines():
+        w = w.strip()
+        if not w:
+            continue
+        # Remove any HTML tags the model might have included
+        w = re.sub(r'<[^>]+>', '', w)
+        corrected.append(w)
     # Fallback: mantén largo exacto
     if len(corrected) != len(words):
         import logging
@@ -86,9 +94,10 @@ class MyAIOCREngine(OcrEngine):
         # texto llano limpio (sin etiquetas HTML)
         soup = bs4.BeautifulSoup(corrected, "html.parser")
         plain_text = soup.get_text(separator="\n")
-        import re
-        # Elimina cualquier etiqueta HTML residual
+        import re, html
+        # Elimina cualquier etiqueta HTML residual y entidades HTML
         plain_text = re.sub(r'<[^>]+>', '', plain_text)
+        plain_text = html.unescape(plain_text)
         with open(output_text, "w", encoding="utf-8") as f:
             f.write(plain_text)
 
