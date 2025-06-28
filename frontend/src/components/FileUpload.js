@@ -28,6 +28,12 @@ function FileUpload({ onJobCompleted }) {
   const [jobId, setJobId] = useState(null);
   const [targetLanguage, setTargetLanguage] = useState(DEFAULT_LANGUAGES[0]);
   const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
+  const [dpi, setDpi] = useState(150);
+  const [compress, setCompress] = useState(false);
+  const [format, setFormat] = useState('JPEG');
+  const [quality, setQuality] = useState(85);
+  const [keepOriginal, setKeepOriginal] = useState(false);
+  const [retainMetadata, setRetainMetadata] = useState(true);
 
   const apis = ['Gemini'];
 
@@ -122,6 +128,12 @@ function FileUpload({ onJobCompleted }) {
     if (mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') {
       formData.append("target_language", targetLanguage);
     }
+    formData.append('dpi', dpi);
+    formData.append('compress', compress);
+    formData.append('format', format);
+    formData.append('quality', quality);
+    formData.append('keep_original', keepOriginal);
+    formData.append('retain_metadata', retainMetadata);
 
     axios.post(`${API_URL}/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } })
       .then(response => {
@@ -193,6 +205,16 @@ function FileUpload({ onJobCompleted }) {
             /> AI
           </label>
         </div>
+        <div style={{ marginBottom: '10px' }}>
+          <label>
+            DPI:
+            <select value={dpi} onChange={e => setDpi(parseInt(e.target.value))} style={{ marginLeft: '10px' }}>
+              {[100,150,300,600].map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="prompt-selector" style={{ marginBottom: '10px' }}>
           <label>
             {mode === "OCR" ? "Prompt not required for OCR mode" : mode === "OCR + AI" ? "Prompt is fixed for OCR + AI" : "Select Prompt:"}
@@ -226,6 +248,33 @@ function FileUpload({ onJobCompleted }) {
             </label>
           </div>
         )}
+        <div style={{ marginBottom: '10px' }}>
+          <label>
+            <input type="checkbox" checked={compress} onChange={e => setCompress(e.target.checked)} /> Enable Compression
+          </label>
+          {compress && (
+            <div style={{ marginTop: '10px' }}>
+              <label>
+                Format:
+                <select value={format} onChange={e => setFormat(e.target.value)} style={{ marginLeft: '10px' }}>
+                  {['JPEG','PNG'].map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                Quality:
+                <input type="number" min="10" max="100" value={quality} onChange={e => setQuality(parseInt(e.target.value))} style={{ marginLeft: '5px', width: '60px' }} />
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                <input type="checkbox" checked={keepOriginal} onChange={e => setKeepOriginal(e.target.checked)} /> Keep original
+              </label>
+              <label style={{ marginLeft: '10px' }}>
+                <input type="checkbox" checked={retainMetadata} onChange={e => setRetainMetadata(e.target.checked)} /> Retain metadata
+              </label>
+            </div>
+          )}
+        </div>
         <button type="submit">Upload and process</button>
         {jobId && (
           <button type="button" onClick={handleStop} style={{ marginLeft: '10px' }}>

@@ -40,6 +40,7 @@ ocrAI is a simple web app that combines Optical Character Recognition (OCR) and 
   - Optionally compress images in the resulting PDF.
   - Configure target DPI, JPEG/PNG format, and quality.
   - Keep original uncompressed PDF if desired.
+  - DPI choices: **100**, **150** (default), **300**, or **600**.
 
 - **Translation** 🌐  
   - Translate PDF or TXT documents page by page.
@@ -59,6 +60,7 @@ ocrAI is a simple web app that combines Optical Character Recognition (OCR) and 
      - **OCR** (Tesseract Only)
      - **OCR + AI** (Tesseract + AI for correction and AI-embedded PDF)
      - **AI** (Full AI OCR, generates markdown TXT)
+   - Select the desired DPI (100, 150, 300 or 600).
    - For AI modes, select the desired prompt.
    - Click **Upload and process** and watch the real-time progress.
    - If you used **AI** mode, you can convert the resulting TXT to PDF using the **TXT to PDF** tab.

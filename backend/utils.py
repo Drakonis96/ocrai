@@ -27,7 +27,7 @@ def encode_image(file_path):
     with open(file_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
-def run_tesseract(file_path):
+def run_tesseract(file_path, dpi=150):
     """
     Si el archivo es un PDF, se realiza OCR página a página añadiendo al principio de cada una
     la cabecera con el formato [Page 0001], [Page 0002], etc.
@@ -36,7 +36,7 @@ def run_tesseract(file_path):
     extracted_text = ""
     if file_path.lower().endswith(".pdf"):
         try:
-            pages = convert_from_path(file_path)
+            pages = convert_from_path(file_path, dpi=dpi)
             for i, page in enumerate(pages, start=1):
                 page_text = pytesseract.image_to_string(page, lang='eng')
                 extracted_text += f"[Page {i:04d}]\n{page_text}\n\n"
@@ -159,11 +159,11 @@ def compress_pdf_images(input_pdf: str, output_pdf: str, dpi: int = 150,
     except Exception:
         return False
 
-def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_cancelled):
+def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_cancelled, dpi=150):
     final_text = ""
     if file_path.lower().endswith(".pdf"):
         try:
-            pages = convert_from_path(file_path)
+            pages = convert_from_path(file_path, dpi=dpi)
         except Exception as e:
             return f"❌ Error processing PDF: {str(e)}"
         total = len(pages)
@@ -186,14 +186,14 @@ def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_can
         update_progress(10, "🔍 Processing image with AI OCR")
         return call_api_ocr(api, model, file_path, prompt_key)
 
-def translate_file_by_pages(file_path, api, model, target_language, prompt_key, update_progress, is_cancelled):
+def translate_file_by_pages(file_path, api, model, target_language, prompt_key, update_progress, is_cancelled, dpi=150):
     """
     Translates the file page by page, returning markdown with pagination.
     """
     final_translation = ""
     if file_path.lower().endswith(".pdf"):
         try:
-            pages = convert_from_path(file_path)
+            pages = convert_from_path(file_path, dpi=dpi)
         except Exception as e:
             return f"❌ Error processing PDF: {str(e)}"
         total = len(pages)
@@ -224,7 +224,7 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
         return "Unsupported file type for translation."
 
 def process_file(file_path, api, model, mode, prompt_key, update_progress,
-                 is_cancelled, compress_opts=None):
+                 is_cancelled, compress_opts=None, dpi=150):
     if is_cancelled():
         update_progress(0, "⏹️ Process cancelled")
         return "Process cancelled."
@@ -235,7 +235,7 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress,
     processed_text = ""
     if mode == "OCR":
         update_progress(15, "🔍 Running OCR...")
-        processed_text = run_tesseract(file_path)
+        processed_text = run_tesseract(file_path, dpi=dpi)
         if is_cancelled():
             update_progress(15, "⏹️ Process cancelled")
             return "Process cancelled."
@@ -267,7 +267,7 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress,
                     update_progress(97, "⚠️ Compression failed.")
     elif mode == "OCR + AI":
         update_progress(20, "🔍 Running Gemini OCR...")
-        tesseract_text = run_tesseract(file_path)
+        tesseract_text = run_tesseract(file_path, dpi=dpi)
         update_progress(35, "🤖 Correcting text with AI...")
         processed_text = call_api_correction(api, model, tesseract_text, prompt_key="ocr_correction")
         update_progress(50, "✅ Tesseract + AI completed.")

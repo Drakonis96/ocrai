@@ -29,25 +29,27 @@ def update_progress(job_id, progress, status):
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
 
-def run_processing(job_id, file_path, api, model, mode, prompt_key, compress_opts):
+def run_processing(job_id, file_path, api, model, mode, prompt_key, compress_opts, dpi):
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
             update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
             is_cancelled=lambda: is_cancelled(job_id),
-            compress_opts=compress_opts
+            compress_opts=compress_opts,
+            dpi=dpi
         )
         active_jobs[job_id]["result"] = result
         update_progress(job_id, 100, "🎉 Process completed")
     except Exception as e:
         update_progress(job_id, active_jobs[job_id]["progress"], f"❌ Error: {str(e)}")
 
-def run_translation(job_id, file_path, api, model, target_language, prompt_key):
+def run_translation(job_id, file_path, api, model, target_language, prompt_key, dpi):
     try:
         result = translate_file_by_pages(
             file_path, api, model, target_language, prompt_key,
             update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
-            is_cancelled=lambda: is_cancelled(job_id)
+            is_cancelled=lambda: is_cancelled(job_id),
+            dpi=dpi
         )
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         translation_file = os.path.join(OUTPUT_FOLDER, base_name + "_translation.txt")
@@ -70,6 +72,8 @@ def upload_file():
     prompt_key = request.form.get('prompt_key')
     compress = request.form.get('compress', 'false').lower() == 'true'
     dpi = int(request.form.get('dpi', 150))
+    if dpi not in [100, 150, 300, 600]:
+        dpi = 150
     img_format = request.form.get('format', 'JPEG')
     quality = int(request.form.get('quality', 85))
     keep_original = request.form.get('keep_original', 'false').lower() == 'true'
@@ -96,7 +100,7 @@ def upload_file():
         "keep_original": keep_original,
         "retain_metadata": retain_metadata,
     }
-    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compress_opts))
+    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compress_opts, dpi))
     thread.start()
 
     return jsonify({"message": "File uploaded, processing started", "job_id": job_id})
