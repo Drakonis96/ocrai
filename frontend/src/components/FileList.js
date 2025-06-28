@@ -48,7 +48,7 @@ function FileList() {
   }, {});
 
   return (
-    <div style={{ textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
+    <div className="page-container page-files">
       <h2>Processed Files</h2>
       {Object.keys(groupedFiles).length === 0 ? (
         <p>No files available.</p>
@@ -73,15 +73,8 @@ function FileList() {
           ))}
           <button
             onClick={handleDeleteAll}
-            style={{
-              marginTop: '20px',
-              backgroundColor: 'red',
-              color: 'white',
-              padding: '10px',
-              border: 'none',
-              borderRadius: '5px',
-              cursor: 'pointer'
-            }}
+            className="btn btn-danger"
+            style={{ marginTop: '20px' }}
           >
             Delete All Files
           </button>

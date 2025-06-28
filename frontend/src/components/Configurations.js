@@ -153,42 +153,36 @@ function Configurations() {
 
   // ----- RENDER -----
   return (
-    <div style={{ textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
+    <div className="page-container page-config">
       <h2>Configurations ⚙️</h2>
 
       {/* Sección: Prompts */}
-      <div style={{ border: '1px solid #ccc', padding: '15px', borderRadius: '8px', marginBottom: '20px' }}>
+      <div className="card">
         <h3>Add / Edit Prompt</h3>
         <form onSubmit={handleAddPrompt}>
-          <div style={{ marginBottom: '10px' }}>
-            <label>
-              Prompt Key:
-              <input 
-                type="text" 
-                value={newPromptKey} 
-                onChange={(e) => setNewPromptKey(e.target.value)} 
-                placeholder="e.g., custom_prompt" 
-                style={{ marginLeft: '10px', width: '100%' }} 
-              />
-            </label>
+          <div className="form-group">
+            <label>Prompt Key:</label>
+            <input
+              type="text"
+              value={newPromptKey}
+              onChange={(e) => setNewPromptKey(e.target.value)}
+              placeholder="e.g., custom_prompt"
+            />
           </div>
-          <div style={{ marginBottom: '10px' }}>
-            <label>
-              Prompt Text:
-              <textarea 
-                value={newPromptText} 
-                onChange={(e) => setNewPromptText(e.target.value)} 
-                placeholder="Enter the prompt text" 
-                style={{ marginLeft: '10px', width: '100%' }} 
-                rows="4"
-              />
-            </label>
+          <div className="form-group">
+            <label>Prompt Text:</label>
+            <textarea
+              value={newPromptText}
+              onChange={(e) => setNewPromptText(e.target.value)}
+              placeholder="Enter the prompt text"
+              rows="4"
+            />
           </div>
-          <button type="submit">Save Prompt</button>
+          <button type="submit" className="btn btn-primary">Save Prompt</button>
         </form>
       </div>
 
-      <div style={{ border: '1px solid #ccc', padding: '15px', borderRadius: '8px', marginBottom: '20px' }}>
+      <div className="card">
         <h3>Current Prompts</h3>
         {Object.keys(prompts).length === 0 ? (
           <p>No prompts available.</p>
@@ -197,7 +191,7 @@ function Configurations() {
             {Object.entries(prompts).map(([key, text]) => (
               <li key={key} style={{ marginBottom: '5px', display: 'flex', justifyContent: 'space-between' }}>
                 <span><strong>{key}:</strong> {text}</span>
-                <button onClick={() => handleDeletePrompt(key)} style={{ fontSize: '12px', padding: '2px 5px' }}>
+                <button onClick={() => handleDeletePrompt(key)} className="btn btn-secondary" style={{ fontSize: '12px', padding: '2px 5px' }}>
                   Delete
                 </button>
               </li>
@@ -207,7 +201,7 @@ function Configurations() {
       </div>
 
       {/* Sección: Modelos Gemini */}
-      <div style={{ border: '1px solid #ccc', padding: '15px', borderRadius: '8px', marginBottom: '20px' }}>
+      <div className="card">
         <h3>Gemini Models</h3>
         {models.length === 0 ? (
           <p>No Gemini models found.</p>
@@ -216,7 +210,7 @@ function Configurations() {
             {models.map((model, i) => (
               <li key={i} style={{ marginBottom: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>{model}</span>
-                <button onClick={() => handleDeleteModel(model)} style={{ fontSize: '12px', padding: '2px 5px' }}>
+                <button onClick={() => handleDeleteModel(model)} className="btn btn-secondary" style={{ fontSize: '12px', padding: '2px 5px' }}>
                   Delete
                 </button>
               </li>
@@ -224,27 +218,26 @@ function Configurations() {
           </ul>
         )}
         <form onSubmit={handleAddModel} style={{ marginTop: '10px' }}>
-          <label>
-            New model name:
+          <div className="form-group">
+            <label>New model name:</label>
             <input
               type="text"
               value={newModel}
               onChange={(e) => setNewModel(e.target.value)}
               placeholder="Enter new model name"
-              style={{ marginLeft: '10px', width: '60%' }}
             />
-          </label>
-          <button type="submit" style={{ marginLeft: '10px' }}>Add Model</button>
+          </div>
+          <button type="submit" className="btn btn-primary">Add Model</button>
         </form>
       </div>
 
       {/* Sección: Download / Upload Config */}
-      <div style={{ marginBottom: '20px', border: '1px solid #ccc', padding: '15px', borderRadius: '8px' }}>
+      <div className="card">
         <h3>Download / Upload Configuration</h3>
-        <button onClick={handleDownloadConfig}>Download Config</button>
+        <button onClick={handleDownloadConfig} className="btn btn-primary">Download Config</button>
         <div style={{ marginTop: '10px' }}>
           <input type="file" onChange={handleConfigFileChange} />
-          <button onClick={handleUploadConfig} style={{ marginLeft: '10px' }}>Upload Config</button>
+          <button onClick={handleUploadConfig} className="btn btn-secondary" style={{ marginLeft: '10px' }}>Upload Config</button>
         </div>
       </div>
 

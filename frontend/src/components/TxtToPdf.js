@@ -37,24 +37,21 @@ function TxtToPdf() {
   };
 
   return (
-    <div style={{ textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
+    <div className="page-container page-txttopdf">
       <h2>TXT to PDF</h2>
-      <div style={{ marginBottom: '10px' }}>
-        <label>
-          Select TXT File:
-          <select
-            value={selectedFile}
-            onChange={(e) => setSelectedFile(e.target.value)}
-            style={{ marginLeft: '10px' }}
-          >
-            <option value="">-- Select TXT File --</option>
-            {txtFiles.map((file, index) => (
-              <option key={index} value={file}>{file}</option>
-            ))}
-          </select>
-        </label>
+      <div className="form-group">
+        <label>Select TXT File:</label>
+        <select
+          value={selectedFile}
+          onChange={(e) => setSelectedFile(e.target.value)}
+        >
+          <option value="">-- Select TXT File --</option>
+          {txtFiles.map((file, index) => (
+            <option key={index} value={file}>{file}</option>
+          ))}
+        </select>
       </div>
-      <button onClick={handleConversion}>Convert to PDF</button>
+      <button onClick={handleConversion} className="btn btn-primary">Convert to PDF</button>
       {message && <p>{message}</p>}
       {pdfFile && (
         <p>

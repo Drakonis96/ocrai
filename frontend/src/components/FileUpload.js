@@ -151,18 +151,16 @@ function FileUpload({ onJobCompleted }) {
   };
 
   return (
-    <div>
+    <div className="page-container page-upload">
       <form onSubmit={handleSubmit} className="upload-form">
         {/* API Selector */}
-        <div style={{ marginBottom: '10px' }}>
-          <label>
-            API:
-            <select value={api} onChange={e => setApi(e.target.value)} style={{ marginLeft: '10px' }}>
-              {apis.map(a => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </select>
-          </label>
+        <div className="form-group">
+          <label>API:</label>
+          <select value={api} onChange={e => setApi(e.target.value)}>
+            {apis.map(a => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
         </div>
         <div
           className="drop-zone"
@@ -179,136 +177,133 @@ function FileUpload({ onJobCompleted }) {
           <input type="file" onChange={handleFileChange} style={{ display: 'none' }} id="fileInput" />
           <label htmlFor="fileInput" style={{ cursor: 'pointer', color: 'blue' }}>Select file</label>
         </div>
-        <div className="selectors" style={{ marginBottom: '10px' }}>
+        <div className="form-group">
           <ModelSelector models={models} selectedModel={model} setSelectedModel={setModel} selectedApi={api} />
         </div>
-        <div className="mode-selector" style={{ marginBottom: '10px' }}>
-          <p>Processing mode:</p>
-          <label>
+        <div className="mode-selector form-group">
+          <label className="checkbox-group">
             <input
               type="radio"
               value="OCR"
               checked={mode === 'OCR'}
               onChange={(e) => setMode(e.target.value)}
-            /> OCR
+            />
+            <span>OCR</span>
           </label>
-          <label style={{ marginLeft: '20px' }}>
+          <label className="checkbox-group" style={{ marginLeft: '20px' }}>
             <input
               type="radio"
               value="OCR + AI"
               checked={mode === 'OCR + AI'}
               onChange={(e) => setMode(e.target.value)}
-            /> OCR + AI
+            />
+            <span>OCR + AI</span>
           </label>
-          <label style={{ marginLeft: '20px' }}>
+          <label className="checkbox-group" style={{ marginLeft: '20px' }}>
             <input
               type="radio"
               value="AI"
               checked={mode === 'AI'}
               onChange={(e) => setMode(e.target.value)}
-            /> AI
+            />
+            <span>AI</span>
           </label>
         </div>
-        <div className="prompt-selector" style={{ marginBottom: '10px' }}>
+        <div className="prompt-selector form-group">
           <label>
             {mode === "OCR" ? "Prompt not required for OCR mode" : mode === "OCR + AI" ? "Prompt is fixed for OCR + AI" : "Select Prompt:"}
-            <select
-              value={promptKey}
-              onChange={(e) => setPromptKey(e.target.value)}
-              style={{ marginLeft: '10px' }}
-              disabled={mode === "OCR" || mode === "OCR + AI"}
-            >
-              <option value="">-- Select Prompt --</option>
-              {Object.keys(availablePrompts).map(key => (
-                <option key={key} value={key}>{key}</option>
-              ))}
-            </select>
           </label>
+          <select
+            value={promptKey}
+            onChange={(e) => setPromptKey(e.target.value)}
+            disabled={mode === "OCR" || mode === "OCR + AI"}
+          >
+            <option value="">-- Select Prompt --</option>
+            {Object.keys(availablePrompts).map(key => (
+              <option key={key} value={key}>{key}</option>
+            ))}
+          </select>
         </div>
         {/* Target language selector for translation */}
         {(mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') && (
-          <div className="target-language-selector" style={{ marginBottom: '10px' }}>
-            <label>
-              Target language:
-              <select
-                value={targetLanguage}
-                onChange={e => setTargetLanguage(e.target.value)}
-                style={{ marginLeft: '10px' }}
-              >
-                {availableLanguages.map(lang => (
-                  <option key={lang} value={lang}>{lang}</option>
-                ))}
-              </select>
-            </label>
+          <div className="target-language-selector form-group">
+            <label>Target language:</label>
+            <select
+              value={targetLanguage}
+              onChange={e => setTargetLanguage(e.target.value)}
+            >
+              {availableLanguages.map(lang => (
+                <option key={lang} value={lang}>{lang}</option>
+              ))}
+            </select>
           </div>
         )}
         {/* Image compression options */}
         <div className="compression" style={{ marginBottom: '10px' }}>
-          <label>
+          <label className="checkbox-group">
             <input
               type="checkbox"
               checked={compress}
               onChange={e => setCompress(e.target.checked)}
-            />{' '}
-            Enable image compression
+            />
+            <span>Enable image compression</span>
           </label>
           {compress && (
-            <div style={{ marginTop: '10px' }}>
-              <label>
-                targetDPI:
+            <div className="compression-options">
+              <div className="form-group">
+                <label>Target DPI:</label>
                 <input
                   type="number"
                   min="72"
                   max="300"
                   value={targetDPI}
                   onChange={e => setTargetDPI(e.target.value)}
-                  style={{ marginLeft: '10px', width: '80px' }}
                 />
-              </label>
-              <label style={{ marginLeft: '10px' }}>
-                format:
+              </div>
+              <div className="form-group">
+                <label>Format:</label>
                 <select
                   value={imgFormat}
                   onChange={e => setImgFormat(e.target.value)}
-                  style={{ marginLeft: '10px' }}
                 >
                   <option value="jpeg">jpeg</option>
                   <option value="png">png</option>
                 </select>
-              </label>
-              <label style={{ marginLeft: '10px' }}>
-                quality:
+              </div>
+              <div className="form-group">
+                <label>Quality:</label>
                 <input
                   type="number"
                   min="0"
                   max="100"
                   value={quality}
                   onChange={e => setQuality(e.target.value)}
-                  style={{ marginLeft: '10px', width: '60px' }}
                 />
-              </label>
-              <label style={{ marginLeft: '10px' }}>
-                <input
-                  type="checkbox"
-                  checked={keepOriginalImages}
-                  onChange={e => setKeepOriginalImages(e.target.checked)}
-                />{' '}
-                keepOriginalImages
-              </label>
-              <label style={{ marginLeft: '10px' }}>
-                <input
-                  type="checkbox"
-                  checked={preserveMetadata}
-                  onChange={e => setPreserveMetadata(e.target.checked)}
-                />{' '}
-                preserveMetadata
-              </label>
+              </div>
+              <div className="checkbox-row">
+                <label className="checkbox-group">
+                  <input
+                    type="checkbox"
+                    checked={keepOriginalImages}
+                    onChange={e => setKeepOriginalImages(e.target.checked)}
+                  />
+                  <span>Keep original images</span>
+                </label>
+                <label className="checkbox-group">
+                  <input
+                    type="checkbox"
+                    checked={preserveMetadata}
+                    onChange={e => setPreserveMetadata(e.target.checked)}
+                  />
+                  <span>Preserve metadata</span>
+                </label>
+              </div>
             </div>
           )}
         </div>
-        <button type="submit">Upload and process</button>
+        <button type="submit" className="btn btn-primary">Upload and process</button>
         {jobId && (
-          <button type="button" onClick={handleStop} style={{ marginLeft: '10px' }}>
+          <button type="button" onClick={handleStop} className="btn btn-secondary" style={{ marginLeft: '10px' }}>
             Stop Process
           </button>
         )}
