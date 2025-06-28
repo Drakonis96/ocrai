@@ -166,7 +166,8 @@ def compress_pdf_images(input_pdf, output_pdf, target_dpi=150, fmt='jpeg', quali
                     buf.seek(0)
 
             # Replace the image stream with the optimized one
-            pdf_img.replace(buf)
+            buf.seek(0)
+            page.images[name].stream = pikepdf.Stream(pdf, buf.read())
             if keep_original:
                 pdf_img.extract_to(os.path.join(tmpdir, f"{name}_orig.png"))
 
