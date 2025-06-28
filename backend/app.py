@@ -29,12 +29,13 @@ def update_progress(job_id, progress, status):
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
 
-def run_processing(job_id, file_path, api, model, mode, prompt_key):
+def run_processing(job_id, file_path, api, model, mode, prompt_key, compress_opts):
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
             update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
-            is_cancelled=lambda: is_cancelled(job_id)
+            is_cancelled=lambda: is_cancelled(job_id),
+            compress_opts=compress_opts
         )
         active_jobs[job_id]["result"] = result
         update_progress(job_id, 100, "🎉 Process completed")
@@ -67,6 +68,12 @@ def upload_file():
     model = request.form.get('model')
     mode = request.form.get('mode')  # "OCR", "OCR + AI" or "AI"
     prompt_key = request.form.get('prompt_key')
+    compress = request.form.get('compress', 'false').lower() == 'true'
+    dpi = int(request.form.get('dpi', 150))
+    img_format = request.form.get('format', 'JPEG')
+    quality = int(request.form.get('quality', 85))
+    keep_original = request.form.get('keep_original', 'false').lower() == 'true'
+    retain_metadata = request.form.get('retain_metadata', 'true').lower() == 'true'
 
     if file.filename == '':
         return jsonify({"error": "Empty filename"}), 400
@@ -81,7 +88,15 @@ def upload_file():
     job_id = str(uuid.uuid4())
     active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None}
 
-    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key))
+    compress_opts = {
+        "enabled": compress,
+        "dpi": dpi,
+        "format": img_format,
+        "quality": quality,
+        "keep_original": keep_original,
+        "retain_metadata": retain_metadata,
+    }
+    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compress_opts))
     thread.start()
 
     return jsonify({"message": "File uploaded, processing started", "job_id": job_id})

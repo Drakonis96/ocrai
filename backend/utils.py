@@ -123,6 +123,42 @@ def embed_ai_text_in_pdf(input_pdf: str, output_pdf: str) -> bool:
         print("OCRmyPDF failed:", e)
         return False
 
+def compress_pdf_images(input_pdf: str, output_pdf: str, dpi: int = 150,
+                         img_format: str = "JPEG", quality: int = 85,
+                         retain_metadata: bool = True) -> bool:
+    """Compress images inside a PDF using Ghostscript if available."""
+    if shutil.which("gs") is None:
+        return False
+    img_format = img_format.upper()
+    gs_device = "pdfwrite"
+    cmd = [
+        "gs",
+        "-sDEVICE=" + gs_device,
+        "-dCompatibilityLevel=1.4",
+        "-dNOPAUSE",
+        "-dQUIET",
+        "-dBATCH",
+        "-dDownsampleColorImages=true",
+        "-dDownsampleGrayImages=true",
+        "-dColorImageDownsampleType=/Bicubic",
+        "-dGrayImageDownsampleType=/Bicubic",
+        f"-dColorImageResolution={dpi}",
+        f"-dGrayImageResolution={dpi}",
+        f"-dJPEGQ={quality}",
+        f"-sOutputFile={output_pdf}",
+        input_pdf,
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+        if retain_metadata:
+            try:
+                shutil.copystat(input_pdf, output_pdf)
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
 def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_cancelled):
     final_text = ""
     if file_path.lower().endswith(".pdf"):
@@ -187,12 +223,14 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
     else:
         return "Unsupported file type for translation."
 
-def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled):
+def process_file(file_path, api, model, mode, prompt_key, update_progress,
+                 is_cancelled, compress_opts=None):
     if is_cancelled():
         update_progress(0, "⏹️ Process cancelled")
         return "Process cancelled."
     update_progress(10, "📤 File uploaded. Preparing processing...")
     base_name = os.path.splitext(os.path.basename(file_path))[0]
+    pdf_output = None
 
     processed_text = ""
     if mode == "OCR":
@@ -210,6 +248,23 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
             else:
                 shutil.copy(file_path, pdf_output)
                 update_progress(95, "⚠️ Could not embed OCR; original PDF copied.")
+            if compress_opts and compress_opts.get("enabled"):
+                update_progress(96, "📦 Compressing PDF...")
+                compressed = os.path.join(OUTPUT_FOLDER, base_name + "_compressed.pdf")
+                if compress_pdf_images(
+                        pdf_output,
+                        compressed,
+                        dpi=compress_opts.get("dpi", 150),
+                        img_format=compress_opts.get("format", "JPEG"),
+                        quality=compress_opts.get("quality", 85),
+                        retain_metadata=compress_opts.get("retain_metadata", True)):
+                    if compress_opts.get("keep_original"):
+                        shutil.move(compressed, os.path.join(OUTPUT_FOLDER, base_name + "_ocr_compressed.pdf"))
+                    else:
+                        os.replace(compressed, pdf_output)
+                    update_progress(97, "📦 Compression completed.")
+                else:
+                    update_progress(97, "⚠️ Compression failed.")
     elif mode == "OCR + AI":
         update_progress(20, "🔍 Running Gemini OCR...")
         tesseract_text = run_tesseract(file_path)
@@ -230,6 +285,23 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
             else:
                 shutil.copy(file_path, pdf_output)
                 update_progress(95, "⚠️ Could not embed AI; original PDF copied.")
+            if compress_opts and compress_opts.get("enabled"):
+                update_progress(96, "📦 Compressing PDF...")
+                compressed = os.path.join(OUTPUT_FOLDER, base_name + "_compressed.pdf")
+                if compress_pdf_images(
+                        pdf_output,
+                        compressed,
+                        dpi=compress_opts.get("dpi", 150),
+                        img_format=compress_opts.get("format", "JPEG"),
+                        quality=compress_opts.get("quality", 85),
+                        retain_metadata=compress_opts.get("retain_metadata", True)):
+                    if compress_opts.get("keep_original"):
+                        shutil.move(compressed, os.path.join(OUTPUT_FOLDER, base_name + "_ocr_compressed.pdf"))
+                    else:
+                        os.replace(compressed, pdf_output)
+                    update_progress(97, "📦 Compression completed.")
+                else:
+                    update_progress(97, "⚠️ Compression failed.")
     elif mode == "AI":
         update_progress(20, "📂 File ready for full Gemini processing...")
         processed_text = call_api_ocr(api, model, file_path, prompt_key)

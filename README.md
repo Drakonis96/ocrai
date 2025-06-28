@@ -33,8 +33,13 @@ ocrAI is a simple web app that combines Optical Character Recognition (OCR) and 
     Uses Gemini AI to process the document page by page. Generates a TXT file in markdown format (with page markers and structure). This TXT can be converted to a PDF using the **TXT to PDF** tool in the app.
   - All modes show real-time progress with emojis and run in the background.
 
-- **TXT to PDF** 📝  
+- **TXT to PDF** 📝
   - Convert any TXT file (especially markdown from AI mode) to a clean, paginated PDF directly from the app.
+
+- **Post-OCR Compression** 📦
+  - Optionally compress images in the resulting PDF.
+  - Configure target DPI, JPEG/PNG format, and quality.
+  - Keep original uncompressed PDF if desired.
 
 - **Translation** 🌐  
   - Translate PDF or TXT documents page by page.
