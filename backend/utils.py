@@ -139,20 +139,37 @@ def compress_pdf_images(input_pdf, output_pdf, target_dpi=150, fmt='jpeg', quali
             pil_img = pdf_img.as_pil_image()
             if not preserve_metadata and 'exif' in pil_img.info:
                 pil_img.info.pop('exif')
-            img_path = os.path.join(tmpdir, f"{name}.{fmt}")
+
+            # Save the optimized image into an in-memory buffer
+            from io import BytesIO
+            buf = BytesIO()
             if fmt.lower() == 'jpeg':
                 pil_img = pil_img.convert('RGB')
-                pil_img.save(img_path, 'JPEG', quality=quality, optimize=True, dpi=(target_dpi, target_dpi))
+                pil_img.save(buf, 'JPEG', quality=quality, optimize=True, dpi=(target_dpi, target_dpi))
                 if shutil.which('cjpeg'):
-                    subprocess.run(['cjpeg', '-quality', str(quality), '-outfile', img_path, img_path], check=True)
+                    temp_jpg = os.path.join(tmpdir, f"{name}.jpg")
+                    with open(temp_jpg, 'wb') as f:
+                        f.write(buf.getvalue())
+                    subprocess.run(['cjpeg', '-quality', str(quality), '-outfile', temp_jpg, temp_jpg], check=True)
+                    buf = open(temp_jpg, 'rb')
+                else:
+                    buf.seek(0)
             else:
-                pil_img.save(img_path, 'PNG', optimize=True, dpi=(target_dpi, target_dpi))
+                pil_img.save(buf, 'PNG', optimize=True, dpi=(target_dpi, target_dpi))
                 if shutil.which('pngquant'):
-                    subprocess.run(['pngquant', '--force', '--output', img_path, f'--quality={quality}-{quality}', img_path], check=True)
-            new_pdf_img = PdfImage(img_path)
-            page.images[name] = new_pdf_img
+                    temp_png = os.path.join(tmpdir, f"{name}.png")
+                    with open(temp_png, 'wb') as f:
+                        f.write(buf.getvalue())
+                    subprocess.run(['pngquant', '--force', '--output', temp_png, f'--quality={quality}-{quality}', temp_png], check=True)
+                    buf = open(temp_png, 'rb')
+                else:
+                    buf.seek(0)
+
+            # Replace the image stream with the optimized one
+            pdf_img.replace(buf)
             if keep_original:
                 pdf_img.extract_to(os.path.join(tmpdir, f"{name}_orig.png"))
+
     pdf.save(output_pdf)
     shutil.rmtree(tmpdir)
 
