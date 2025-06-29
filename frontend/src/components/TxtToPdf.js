@@ -9,57 +9,151 @@ function TxtToPdf() {
   const [selectedFile, setSelectedFile] = useState('');
   const [message, setMessage] = useState('');
   const [pdfFile, setPdfFile] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Obtener la lista de archivos y filtrar solo los .txt
-    axios.get(`${API_URL}/files`)
-      .then(response => {
-        const files = response.data.files.filter(file => file.toLowerCase().endsWith('.txt'));
-        setTxtFiles(files);
-      })
-      .catch(err => console.error(err));
+    fetchTxtFiles();
   }, []);
 
-  const handleConversion = () => {
+  const fetchTxtFiles = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/files`);
+      const files = response.data.files
+        .filter(fileObj => fileObj.name.toLowerCase().endsWith('.txt'))
+        .map(fileObj => fileObj.name);
+      setTxtFiles(files);
+    } catch (err) {
+      console.error(err);
+      setMessage("❌ Error loading TXT files.");
+    }
+  };
+
+  const handleConversion = async () => {
     if (!selectedFile) {
       setMessage("⚠️ Please select a TXT file.");
       return;
     }
-    axios.post(`${API_URL}/txttopdf`, { filename: selectedFile })
-      .then(response => {
-        setMessage(response.data.message);
-        setPdfFile(response.data.pdf_file);
-      })
-      .catch(err => {
-        setMessage("❌ Error converting TXT to PDF.");
-        console.error(err);
-      });
+    
+    setLoading(true);
+    setMessage("🔄 Converting TXT to PDF...");
+    
+    try {
+      const response = await axios.post(`${API_URL}/txttopdf`, { filename: selectedFile });
+      setMessage(response.data.message);
+      setPdfFile(response.data.pdf_file);
+    } catch (err) {
+      setMessage("❌ Error converting TXT to PDF.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (pdfFile) {
+      window.location.href = `${API_URL}/files/${pdfFile}`;
+    }
   };
 
   return (
-    <div style={{ textAlign: 'left', maxWidth: '600px', margin: '0 auto' }}>
-      <h2>TXT to PDF</h2>
-      <div style={{ marginBottom: '10px' }}>
-        <label>
-          Select TXT File:
+    <div className="txt-to-pdf-container">
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">TXT to PDF Converter</h3>
+          <p style={{ color: 'var(--gray-600)', fontSize: '0.875rem', margin: 0 }}>
+            Convert your text files to PDF format
+          </p>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Select TXT File</label>
           <select
             value={selectedFile}
             onChange={(e) => setSelectedFile(e.target.value)}
-            style={{ marginLeft: '10px' }}
+            className="form-select"
+            disabled={loading}
           >
-            <option value="">-- Select TXT File --</option>
+            <option value="">-- Choose a TXT file --</option>
             {txtFiles.map((file, index) => (
               <option key={index} value={file}>{file}</option>
             ))}
           </select>
-        </label>
+          {txtFiles.length === 0 && (
+            <p style={{ 
+              fontSize: '0.875rem', 
+              color: 'var(--gray-500)', 
+              margin: '0.5rem 0 0 0',
+              fontStyle: 'italic' 
+            }}>
+              No TXT files found. Process some documents first.
+            </p>
+          )}
+        </div>
+
+        <div className="form-actions">
+          <button 
+            onClick={handleConversion} 
+            className="btn btn-primary"
+            disabled={!selectedFile || loading}
+          >
+            {loading ? (
+              <>
+                <div className="spinner"></div>
+                Converting...
+              </>
+            ) : (
+              <>📄 Convert to PDF</>
+            )}
+          </button>
+          
+          <button 
+            onClick={fetchTxtFiles} 
+            className="btn btn-secondary"
+            disabled={loading}
+          >
+            🔄 Refresh Files
+          </button>
+        </div>
       </div>
-      <button onClick={handleConversion}>Convert to PDF</button>
-      {message && <p>{message}</p>}
+
+      {message && (
+        <div className={`alert ${message.includes('❌') ? 'alert-error' : 
+                                message.includes('⚠️') ? 'alert-warning' : 'alert-info'}`}>
+          {message}
+        </div>
+      )}
+
       {pdfFile && (
-        <p>
-          Download PDF: <a href={`${API_URL}/files/${pdfFile}`} download>{pdfFile}</a>
-        </p>
+        <div className="card success-card">
+          <div className="card-header">
+            <h4 className="card-title">✅ Conversion Complete</h4>
+          </div>
+          <div className="conversion-result">
+            <div className="file-info">
+              <div className="file-icon">📄</div>
+              <div className="file-details">
+                <p className="file-name">{pdfFile}</p>
+                <p className="file-description">Your PDF is ready for download</p>
+              </div>
+            </div>
+            <button 
+              onClick={handleDownload}
+              className="btn btn-success"
+            >
+              📥 Download PDF
+            </button>
+          </div>
+        </div>
+      )}
+
+      {txtFiles.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-state-icon">📝</div>
+          <h3 className="empty-state-title">No TXT files available</h3>
+          <p className="empty-state-description">
+            Process some documents first to generate TXT files that can be converted to PDF
+          </p>
+        </div>
       )}
     </div>
   );

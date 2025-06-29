@@ -3,12 +3,12 @@ import React from 'react';
 
 function ModelSelector({ models, selectedModel, setSelectedModel }) {
   return (
-    <label style={{ marginLeft: '10px' }}>
-      Model:
+    <div className="form-group">
+      <label className="form-label">AI Model</label>
       <select
         value={selectedModel}
         onChange={(e) => setSelectedModel(e.target.value)}
-        style={{ marginLeft: '10px' }}
+        className="form-select"
       >
         {models.map((model, index) => (
           <option key={index} value={model}>
@@ -16,7 +16,15 @@ function ModelSelector({ models, selectedModel, setSelectedModel }) {
           </option>
         ))}
       </select>
-    </label>
+      <p style={{ 
+        fontSize: '0.75rem', 
+        color: 'var(--gray-500)', 
+        margin: '0.5rem 0 0 0',
+        lineHeight: 1.4 
+      }}>
+        Choose the AI model for processing your documents
+      </p>
+    </div>
   );
 }
 

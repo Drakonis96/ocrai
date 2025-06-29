@@ -10,6 +10,8 @@ import uuid
 import subprocess
 import base64
 import re
+import fitz  # PyMuPDF
+import img2pdf
 from models import get_prompt
 
 from reportlab.lib.pagesizes import A4
@@ -107,6 +109,7 @@ def embed_ai_text_in_pdf(input_pdf: str, output_pdf: str) -> bool:
     sidecar = Path(output_pdf).with_suffix('.txt')
     import subprocess
     import os
+    import re
     env = os.environ.copy()
     env['PYTHONPATH'] = f"{backend_path}:{env.get('PYTHONPATH','')}"
     try:
@@ -118,6 +121,30 @@ def embed_ai_text_in_pdf(input_pdf: str, output_pdf: str) -> bool:
             '--sidecar', str(sidecar),
             input_pdf, output_pdf
         ], check=True, env=env)
+        
+        # Clean up sidecar file if it exists and contains HTML
+        if sidecar.exists():
+            try:
+                with open(sidecar, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Check if the content contains HTML tags
+                if '<' in content and '>' in content:
+                    # Clean HTML from sidecar content
+                    clean_content = re.sub(r'<[^>]*>', '', content)
+                    clean_content = re.sub(r"class='[^']*'", '', clean_content)
+                    clean_content = re.sub(r'class="[^"]*"', '', clean_content)
+                    clean_content = re.sub(r'&[a-zA-Z]+;', '', clean_content)
+                    clean_content = re.sub(r'\n\s*\n', '\n', clean_content)
+                    clean_content = re.sub(r' +', ' ', clean_content)
+                    clean_content = clean_content.strip()
+                    
+                    # Write back the cleaned content
+                    with open(sidecar, 'w', encoding='utf-8') as f:
+                        f.write(clean_content)
+            except Exception as e:
+                print(f"Warning: Could not clean sidecar file: {e}")
+        
         return True
     except subprocess.CalledProcessError as e:
         print("OCRmyPDF failed:", e)
@@ -187,7 +214,7 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
     else:
         return "Unsupported file type for translation."
 
-def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled):
+def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled, compression_settings=None):
     if is_cancelled():
         update_progress(0, "⏹️ Process cancelled")
         return "Process cancelled."
@@ -195,6 +222,8 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
     base_name = os.path.splitext(os.path.basename(file_path))[0]
 
     processed_text = ""
+    final_pdf_path = None
+    
     if mode == "OCR":
         update_progress(15, "🔍 Running OCR...")
         processed_text = run_tesseract(file_path)
@@ -206,10 +235,12 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
             update_progress(60, "📝 Embedding OCR into PDF...")
             pdf_output = os.path.join(OUTPUT_FOLDER, base_name + "_ocr.pdf")
             if embed_ocr_in_pdf(file_path, pdf_output):
-                update_progress(95, "📄 OCR successfully embedded in PDF.")
+                update_progress(80, "📄 OCR successfully embedded in PDF.")
+                final_pdf_path = pdf_output
             else:
                 shutil.copy(file_path, pdf_output)
-                update_progress(95, "⚠️ Could not embed OCR; original PDF copied.")
+                update_progress(80, "⚠️ Could not embed OCR; original PDF copied.")
+                final_pdf_path = pdf_output
     elif mode == "OCR + AI":
         update_progress(20, "🔍 Running Gemini OCR...")
         tesseract_text = run_tesseract(file_path)
@@ -226,10 +257,12 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
                         os.remove(sidecar_txt)
                     except Exception:
                         pass
-                update_progress(95, "📄 AI layer successfully embedded in PDF.")
+                update_progress(80, "📄 AI layer successfully embedded in PDF.")
+                final_pdf_path = pdf_output
             else:
                 shutil.copy(file_path, pdf_output)
-                update_progress(95, "⚠️ Could not embed AI; original PDF copied.")
+                update_progress(80, "⚠️ Could not embed AI; original PDF copied.")
+                final_pdf_path = pdf_output
     elif mode == "AI":
         update_progress(20, "📂 File ready for full Gemini processing...")
         processed_text = call_api_ocr(api, model, file_path, prompt_key)
@@ -240,6 +273,48 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
     if is_cancelled():
         update_progress(75, "⏹️ Process cancelled")
         return "Process cancelled."
+
+    # Apply compression if enabled and we have a PDF to compress
+    if compression_settings and compression_settings.get('enabled', False):
+        if final_pdf_path and os.path.exists(final_pdf_path):
+            update_progress(85, "🗜️ Compressing PDF...")
+            try:
+                # Create a temporary compressed file
+                base_name = os.path.splitext(os.path.basename(final_pdf_path))[0]
+                temp_compressed = os.path.join(OUTPUT_FOLDER, base_name + "_temp_compressed.pdf")
+                
+                # Apply Ghostscript compression to the final OCR PDF
+                compressed_pdf = compress_pdf_with_ghostscript(final_pdf_path, temp_compressed, compression_settings)
+                
+                if compressed_pdf and os.path.exists(compressed_pdf):
+                    # Check if compression actually reduced file size
+                    original_size = os.path.getsize(final_pdf_path)
+                    compressed_size = os.path.getsize(compressed_pdf)
+                    
+                    if compressed_size < original_size:
+                        # Replace the original with compressed version
+                        final_compressed = os.path.join(OUTPUT_FOLDER, base_name + "_compressed.pdf")
+                        shutil.move(compressed_pdf, final_compressed)
+                        savings = ((original_size - compressed_size) / original_size) * 100
+                        update_progress(95, f"✅ Compression completed - {savings:.1f}% size reduction!")
+                    else:
+                        # Compression didn't help, remove temp file
+                        if os.path.exists(compressed_pdf):
+                            os.remove(compressed_pdf)
+                        update_progress(95, "⚠️ Compression did not reduce file size, keeping original")
+                else:
+                    update_progress(95, "⚠️ Compression process failed")
+                    
+            except Exception as e:
+                update_progress(95, f"⚠️ Compression failed: {str(e)}")
+        elif not file_path.lower().endswith(".pdf"):
+            # For single images, compress and save
+            update_progress(85, "🗜️ Compressing image...")
+            try:
+                compressed_image_path = process_with_compression(file_path, compression_settings)
+                update_progress(95, "✅ Image compression completed.")
+            except Exception as e:
+                update_progress(95, f"⚠️ Image compression failed: {str(e)}")
 
     update_progress(98, "📝 Saving results and finishing up...")
 
@@ -395,3 +470,140 @@ def convert_txt_to_pdf(txt_file_path):
         flowables = flowables[:-1]  # No dejar salto de página al final
     doc.build(flowables)
     return output_pdf
+
+def compress_image(image, target_dpi=150, quality=85, format_type="JPEG"):
+    """
+    Compresses a PIL Image based on the specified parameters.
+    
+    Args:
+        image: PIL Image object
+        target_dpi: Target DPI for the compressed image
+        quality: JPEG quality (1-100, only for JPEG)
+        format_type: "JPEG" or "PNG"
+    
+    Returns:
+        Compressed PIL Image object
+    """
+    # Calculate new size based on target DPI
+    if hasattr(image, 'info') and 'dpi' in image.info:
+        original_dpi = image.info['dpi'][0] if isinstance(image.info['dpi'], tuple) else image.info['dpi']
+    else:
+        original_dpi = 300  # Default assumption for scanned documents
+    
+    if original_dpi > target_dpi:
+        scale_factor = target_dpi / original_dpi
+        new_width = int(image.width * scale_factor)
+        new_height = int(image.height * scale_factor)
+        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    # Convert to RGB if saving as JPEG
+    if format_type == "JPEG" and image.mode in ("RGBA", "P"):
+        # Create a white background
+        rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+        if image.mode == "P":
+            image = image.convert("RGBA")
+        rgb_image.paste(image, mask=image.split()[-1] if image.mode == "RGBA" else None)
+        image = rgb_image
+    
+    return image
+
+def compress_pdf_with_ghostscript(input_pdf_path, output_pdf_path, compression_settings):
+    """
+    Compresses a PDF using Ghostscript - more effective than PyMuPDF for compression.
+    """
+    target_dpi = compression_settings.get('target_dpi', 150)
+    quality = compression_settings.get('quality', 85)
+    
+    # More aggressive compression settings
+    try:
+        cmd = [
+            'gs',
+            '-sDEVICE=pdfwrite',
+            '-dCompatibilityLevel=1.4',
+            '-dPDFSETTINGS=/ebook',  # More aggressive than before
+            '-dNOPAUSE',
+            '-dQUIET',
+            '-dBATCH',
+            '-dAutoRotatePages=/None',
+            '-dColorImageDownsampleType=/Bicubic',
+            '-dColorImageResolution=150',
+            '-dGrayImageDownsampleType=/Bicubic', 
+            '-dGrayImageResolution=150',
+            '-dMonoImageDownsampleType=/Bicubic',
+            '-dMonoImageResolution=300',
+            '-dColorImageFilter=/DCTEncode',
+            '-dGrayImageFilter=/DCTEncode',
+            '-dOptimize=true',
+            '-dEmbedAllFonts=true',
+            '-dSubsetFonts=true',
+            '-dCompressFonts=true',
+            '-dNOPLATFONTS=true',
+            f'-sOutputFile={output_pdf_path}',
+            input_pdf_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        # Check if output file was created and is smaller
+        if os.path.exists(output_pdf_path):
+            return output_pdf_path
+        else:
+            return None
+            
+    except subprocess.CalledProcessError as e:
+        print(f"Ghostscript compression failed: {e}")
+        print(f"Error output: {e.stderr}")
+        return None
+
+def compress_pdf_images(input_pdf_path, output_pdf_path, compression_settings):
+    """
+    Compresses images in a PDF file while preserving text and structure.
+    Now uses Ghostscript for better compression results.
+    """
+    return compress_pdf_with_ghostscript(input_pdf_path, output_pdf_path, compression_settings)
+
+def process_with_compression(file_path, compression_settings=None):
+    """
+    Process a file with optional image compression.
+    
+    Args:
+        file_path: Path to the input file
+        compression_settings: Dictionary with compression parameters or None to skip compression
+    
+    Returns:
+        Path to the processed file (compressed if compression_settings provided)
+    """
+    if not compression_settings or not compression_settings.get('enabled', False):
+        return file_path
+    
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    
+    if file_path.lower().endswith('.pdf'):
+        # Compress PDF images
+        compressed_path = os.path.join(OUTPUT_FOLDER, base_name + "_compressed.pdf")
+        return compress_pdf_images(file_path, compressed_path, compression_settings)
+    else:
+        # Compress single image
+        try:
+            image = Image.open(file_path)
+            compressed_image = compress_image(
+                image, 
+                compression_settings.get('target_dpi', 150),
+                compression_settings.get('quality', 85),
+                compression_settings.get('format', 'JPEG')
+            )
+            
+            # Determine output format and extension
+            format_type = compression_settings.get('format', 'JPEG')
+            ext = '.jpg' if format_type == 'JPEG' else '.png'
+            compressed_path = os.path.join(OUTPUT_FOLDER, base_name + "_compressed" + ext)
+            
+            if format_type == "JPEG":
+                compressed_image.save(compressed_path, format="JPEG", quality=compression_settings.get('quality', 85), optimize=True)
+            else:
+                compressed_image.save(compressed_path, format="PNG", optimize=True)
+            
+            return compressed_path
+        except Exception as e:
+            print(f"Error compressing image: {e}")
+            return file_path

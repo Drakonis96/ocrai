@@ -2,8 +2,11 @@
 default_prompts = {
     # Prompt para corrección de HOCR (plugin OCRmyPDF)
     "ocr_correction": (
-        "Automatically detect the language of the document. Correct only the text within <span class='ocrx_word'> elements in the following HOCR HTML. "
-        "Do not modify the structure, attributes, or positions. Return the corrected HOCR, changing only the text content of each word."
+        "Automatically detect the language of the document. You will receive a list of words extracted from an OCR document. "
+        "Correct any spelling errors, OCR mistakes, or formatting issues in these words. "
+        "Return ONLY the corrected words, one per line, in the same order as provided. "
+        "Do NOT include any HTML tags, span elements, class attributes, or any other markup. "
+        "Return ONLY plain text words, nothing else."
     ),
     # Prompt para OCR puro (IA) en markdown (ENGLISH)
     "ocr": (

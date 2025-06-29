@@ -7,58 +7,64 @@ function Notifications({ notifications, onClear }) {
   const unseenCount = notifications.length;
 
   return (
-    <div style={{ position: 'fixed', bottom: '10px', right: '10px' }}>
-      <div style={{ position: 'relative', display: 'inline-block' }}>
-        <button
-          onClick={toggleOpen}
-          style={{ fontSize: '24px', background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          🔔
-          {unseenCount > 0 && (
-            <span style={{
-              position: 'absolute',
-              top: '-5px',
-              right: '-5px',
-              background: 'red',
-              color: 'white',
-              borderRadius: '50%',
-              padding: '2px 6px',
-              fontSize: '12px'
-            }}>
-              {unseenCount}
-            </span>
-          )}
-        </button>
-      </div>
-      {isOpen && (
-        <div style={{
-          position: 'absolute',
-          right: 0,
-          bottom: '40px',
-          width: '300px',
-          maxHeight: '400px',
-          overflowY: 'auto',
-          border: '1px solid #ccc',
-          borderRadius: '8px',
-          padding: '10px',
-          backgroundColor: '#fff',
-          boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h4 style={{ margin: 0 }}>Notifications</h4>
-            <button onClick={onClear} style={{ fontSize: '12px', padding: '2px 5px' }}>Clear</button>
+    <div className="notifications-container">
+      {isOpen && notifications.length > 0 && (
+        <div className="notifications-panel">
+          <div className="notifications-header">
+            <h3 className="notifications-title">
+              Recent Activities
+            </h3>
+            <div className="notifications-actions">
+              <button 
+                onClick={onClear} 
+                className="btn btn-sm btn-secondary"
+              >
+                Clear All
+              </button>
+              <button 
+                onClick={toggleOpen} 
+                className="notification-close"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          {notifications.length === 0 ? (
-            <p>No notifications.</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {notifications.map((note, index) => (
-                <li key={index} style={{ marginBottom: '5px' }}>{note}</li>
-              ))}
-            </ul>
-          )}
+          
+          <div className="notifications-list">
+            {notifications.map((note, index) => (
+              <div key={index} className="notification">
+                <div className="notification-content">
+                  <div className="notification-icon">
+                    {note.includes('❌') ? '❌' : 
+                     note.includes('✅') ? '✅' : 
+                     note.includes('⚠️') ? '⚠️' : '📄'}
+                  </div>
+                  <div className="notification-message">
+                    {note}
+                  </div>
+                </div>
+                <div className="notification-time">
+                  {new Date().toLocaleTimeString()}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+      
+      {/* Floating notification button */}
+      <button
+        onClick={toggleOpen}
+        className={`notification-toggle ${unseenCount > 0 ? 'has-notifications' : ''}`}
+        title="View notifications"
+      >
+        🔔
+        {unseenCount > 0 && (
+          <span className="notification-badge">
+            {unseenCount > 99 ? '99+' : unseenCount}
+          </span>
+        )}
+      </button>
     </div>
   );
 }

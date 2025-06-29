@@ -20,6 +20,7 @@ def _correct_hocr_with_ai(hocr_html: str, prompt_key="ocr_correction",
     3) Sustituye cada palabra en el árbol BeautifulSoup.
     4) Devuelve el HOCR corregido.
     """
+    import re
     soup = bs4.BeautifulSoup(hocr_html, "html.parser")
     words = [span.get_text() for span in soup.select("span.ocrx_word")]
     chunk = "\n".join(words)
@@ -30,18 +31,31 @@ def _correct_hocr_with_ai(hocr_html: str, prompt_key="ocr_correction",
         "\n---\n"
         "DEVUELVE_LA_MISMA_CANTIDAD_DE_PALABRAS_CORREGIDAS,"
         "EN_EL_MISMO_ORDEN,UNA_POR_LÍNEA_Y_NADA_MÁS."
+        "NO_INCLUYAS_ETIQUETAS_HTML,_SOLO_TEXTO_PLANO."
     )
     from google import genai
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     rsp = client.models.generate_content(model=model, contents=[prompt])
-    corrected = [w.strip() for w in rsp.text.splitlines() if w.strip()]
+    
+    # Clean the AI response to ensure no HTML tags are included
+    corrected_text = rsp.text
+    # Remove any HTML tags that might be in the AI response
+    corrected_text = re.sub(r'<[^>]+>', '', corrected_text)
+    corrected = [w.strip() for w in corrected_text.splitlines() if w.strip()]
+    
     # Fallback: mantén largo exacto
     if len(corrected) != len(words):
         import logging
         logging.warning("Gemini devolvió distinto nº de palabras (%d vs %d)", len(corrected), len(words))
         corrected = (corrected + words)[0:len(words)]
+    
+    # Clean each corrected word to ensure no HTML content
     for span, new_word in zip(soup.select("span.ocrx_word"), corrected):
-        span.string = new_word
+        # Remove any potential HTML tags from the corrected word
+        clean_word = re.sub(r'<[^>]+>', '', new_word).strip()
+        # Ensure we only have plain text content
+        clean_word = re.sub(r'[<>&]', '', clean_word)
+        span.string = clean_word
     return str(soup)
 
 # ---------- Plugin ----------
@@ -87,8 +101,20 @@ class MyAIOCREngine(OcrEngine):
         soup = bs4.BeautifulSoup(corrected, "html.parser")
         plain_text = soup.get_text(separator="\n")
         import re
-        # Elimina cualquier etiqueta HTML residual
-        plain_text = re.sub(r'<[^>]+>', '', plain_text)
+        # Elimina cualquier etiqueta HTML residual de manera más agresiva
+        plain_text = re.sub(r'<[^>]*>', '', plain_text)
+        # Elimina patrones específicos de span tags que podrían quedar
+        plain_text = re.sub(r'<span[^>]*>', '', plain_text)
+        plain_text = re.sub(r'</span>', '', plain_text)
+        # Elimina atributos de clase que podrían quedar
+        plain_text = re.sub(r"class='[^']*'", '', plain_text)
+        plain_text = re.sub(r'class="[^"]*"', '', plain_text)
+        # Elimina caracteres HTML escapados
+        plain_text = re.sub(r'&[a-zA-Z]+;', '', plain_text)
+        # Limpia espacios múltiples y líneas vacías
+        plain_text = re.sub(r'\n\s*\n', '\n', plain_text)
+        plain_text = re.sub(r' +', ' ', plain_text)
+        plain_text = plain_text.strip()
         with open(output_text, "w", encoding="utf-8") as f:
             f.write(plain_text)
 

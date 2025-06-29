@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import ProgressBar from './ProgressBar';
 import ModelSelector from './ModelSelector';
+import CompressionSettings from './CompressionSettings';
 
 const API_URL = '/api';
 
@@ -28,6 +29,13 @@ function FileUpload({ onJobCompleted }) {
   const [jobId, setJobId] = useState(null);
   const [targetLanguage, setTargetLanguage] = useState(DEFAULT_LANGUAGES[0]);
   const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
+  
+  // Compression settings
+  const [compressionEnabled, setCompressionEnabled] = useState(false);
+  const [targetDpi, setTargetDpi] = useState(150);
+  const [quality, setQuality] = useState(85);
+  const [format, setFormat] = useState('JPEG');
+  const [keepOriginal, setKeepOriginal] = useState(false);
 
   const apis = ['Gemini'];
 
@@ -119,6 +127,16 @@ function FileUpload({ onJobCompleted }) {
     formData.append("model", model);
     formData.append("mode", mode);
     formData.append("prompt_key", promptToSend);
+    
+    // Add compression settings
+    formData.append("compression_enabled", compressionEnabled.toString());
+    if (compressionEnabled) {
+      formData.append("target_dpi", targetDpi.toString());
+      formData.append("quality", quality.toString());
+      formData.append("format", format);
+      formData.append("keep_original", keepOriginal.toString());
+    }
+    
     if (mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') {
       formData.append("target_language", targetLanguage);
     }
@@ -135,71 +153,150 @@ function FileUpload({ onJobCompleted }) {
   };
 
   return (
-    <div>
-      <form onSubmit={handleSubmit} className="upload-form">
-        {/* API Selector */}
-        <div style={{ marginBottom: '10px' }}>
-          <label>
-            API:
-            <select value={api} onChange={e => setApi(e.target.value)} style={{ marginLeft: '10px' }}>
+    <div className="upload-container">
+      {/* Upload Form Card */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">Upload Document</h3>
+          <p style={{ color: 'var(--gray-600)', fontSize: '0.875rem', margin: 0 }}>
+            Select a file and configure processing options
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="upload-form">
+          {/* API Selector */}
+          <div className="form-group">
+            <label className="form-label">API Provider</label>
+            <select 
+              value={api} 
+              onChange={e => setApi(e.target.value)} 
+              className="form-select"
+            >
               {apis.map(a => (
                 <option key={a} value={a}>{a}</option>
               ))}
             </select>
-          </label>
-        </div>
-        <div
-          className="drop-zone"
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          style={{
-            border: '2px dashed #ccc',
-            padding: '20px',
-            borderRadius: '5px',
-            marginBottom: '10px'
-          }}
-        >
-          {file ? <p>📄 {file.name}</p> : <p>📂 Drag and drop the file here or click to select</p>}
-          <input type="file" onChange={handleFileChange} style={{ display: 'none' }} id="fileInput" />
-          <label htmlFor="fileInput" style={{ cursor: 'pointer', color: 'blue' }}>Select file</label>
-        </div>
-        <div className="selectors" style={{ marginBottom: '10px' }}>
-          <ModelSelector models={models} selectedModel={model} setSelectedModel={setModel} selectedApi={api} />
-        </div>
-        <div className="mode-selector" style={{ marginBottom: '10px' }}>
-          <p>Processing mode:</p>
-          <label>
-            <input
-              type="radio"
-              value="OCR"
-              checked={mode === 'OCR'}
-              onChange={(e) => setMode(e.target.value)}
-            /> OCR
-          </label>
-          <label style={{ marginLeft: '20px' }}>
-            <input
-              type="radio"
-              value="OCR + AI"
-              checked={mode === 'OCR + AI'}
-              onChange={(e) => setMode(e.target.value)}
-            /> OCR + AI
-          </label>
-          <label style={{ marginLeft: '20px' }}>
-            <input
-              type="radio"
-              value="AI"
-              checked={mode === 'AI'}
-              onChange={(e) => setMode(e.target.value)}
-            /> AI
-          </label>
-        </div>
-        <div className="prompt-selector" style={{ marginBottom: '10px' }}>
-          <label>
-            {mode === "OCR" ? "Prompt not required for OCR mode" : mode === "OCR + AI" ? "Prompt is fixed for OCR + AI" : "Select Prompt:"}
+          </div>
+
+          {/* File Drop Zone */}
+          <div className="form-group">
+            <label className="form-label">Document</label>
+            <div
+              className={`drop-zone ${file ? 'drop-zone-active' : ''}`}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onClick={() => document.getElementById('fileInput').click()}
+            >
+              <div className="drop-zone-content">
+                {file ? (
+                  <>
+                    <div className="file-icon">📄</div>
+                    <div className="file-info">
+                      <p className="file-name">{file.name}</p>
+                      <p className="file-size">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="upload-icon">📁</div>
+                    <p className="drop-text">Drop your file here or click to browse</p>
+                    <p className="drop-subtext">Supports PDF, images, and text files</p>
+                  </>
+                )}
+              </div>
+              <input 
+                type="file" 
+                onChange={handleFileChange} 
+                style={{ display: 'none' }} 
+                id="fileInput" 
+              />
+            </div>
+          </div>
+
+          {/* Model Selector */}
+          <div className="form-group">
+            <ModelSelector 
+              models={models} 
+              selectedModel={model} 
+              setSelectedModel={setModel} 
+              selectedApi={api} 
+            />
+          </div>
+
+          {/* Compression Settings */}
+          <div className="form-group">
+            <CompressionSettings
+              compressionEnabled={compressionEnabled}
+              setCompressionEnabled={setCompressionEnabled}
+              targetDpi={targetDpi}
+              setTargetDpi={setTargetDpi}
+              quality={quality}
+              setQuality={setQuality}
+              format={format}
+              setFormat={setFormat}
+              keepOriginal={keepOriginal}
+              setKeepOriginal={setKeepOriginal}
+            />
+          </div>
+
+          {/* Processing Mode */}
+          <div className="form-group">
+            <label className="form-label">Processing Mode</label>
+            <div className="mode-selector">
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  value="OCR"
+                  checked={mode === 'OCR'}
+                  onChange={(e) => setMode(e.target.value)}
+                />
+                <span className="radio-custom"></span>
+                <div className="radio-content">
+                  <span className="radio-title">OCR Only</span>
+                  <span className="radio-description">Extract text from document</span>
+                </div>
+              </label>
+              
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  value="OCR + AI"
+                  checked={mode === 'OCR + AI'}
+                  onChange={(e) => setMode(e.target.value)}
+                />
+                <span className="radio-custom"></span>
+                <div className="radio-content">
+                  <span className="radio-title">OCR + AI</span>
+                  <span className="radio-description">Extract and enhance text with AI</span>
+                </div>
+              </label>
+              
+              <label className="radio-option">
+                <input
+                  type="radio"
+                  value="AI"
+                  checked={mode === 'AI'}
+                  onChange={(e) => setMode(e.target.value)}
+                />
+                <span className="radio-custom"></span>
+                <div className="radio-content">
+                  <span className="radio-title">AI Only</span>
+                  <span className="radio-description">Process with AI directly</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Prompt Selector */}
+          <div className="form-group">
+            <label className="form-label">
+              {mode === "OCR" ? "Prompt (Not Required)" : 
+               mode === "OCR + AI" ? "Prompt (Auto-selected)" : "Select Prompt"}
+            </label>
             <select
               value={promptKey}
               onChange={(e) => setPromptKey(e.target.value)}
-              style={{ marginLeft: '10px' }}
+              className="form-select"
               disabled={mode === "OCR" || mode === "OCR + AI"}
             >
               <option value="">-- Select Prompt --</option>
@@ -207,38 +304,58 @@ function FileUpload({ onJobCompleted }) {
                 <option key={key} value={key}>{key}</option>
               ))}
             </select>
-          </label>
-        </div>
-        {/* Target language selector for translation */}
-        {(mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') && (
-          <div className="target-language-selector" style={{ marginBottom: '10px' }}>
-            <label>
-              Target language:
+          </div>
+
+          {/* Target Language Selector */}
+          {(mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') && (
+            <div className="form-group">
+              <label className="form-label">Target Language</label>
               <select
                 value={targetLanguage}
                 onChange={e => setTargetLanguage(e.target.value)}
-                style={{ marginLeft: '10px' }}
+                className="form-select"
               >
                 {availableLanguages.map(lang => (
                   <option key={lang} value={lang}>{lang}</option>
                 ))}
               </select>
-            </label>
+            </div>
+          )}
+
+          {/* Submit Buttons */}
+          <div className="form-actions">
+            <button type="submit" className="btn btn-primary">
+              🚀 Upload and Process
+            </button>
+            {jobId && (
+              <button 
+                type="button" 
+                onClick={handleStop} 
+                className="btn btn-danger"
+              >
+                ⏹️ Stop Process
+              </button>
+            )}
           </div>
-        )}
-        <button type="submit">Upload and process</button>
-        {jobId && (
-          <button type="button" onClick={handleStop} style={{ marginLeft: '10px' }}>
-            Stop Process
-          </button>
-        )}
-      </form>
+        </form>
+      </div>
+
+      {/* Progress and Status */}
       {jobId && (
-        <div>
+        <div className="card">
+          <div className="card-header">
+            <h3 className="card-title">Processing Status</h3>
+          </div>
           <ProgressBar progress={uploadProgress} status={message} />
         </div>
       )}
-      {!jobId && <p>{message}</p>}
+
+      {!jobId && message && (
+        <div className={`alert ${message.includes('❌') ? 'alert-error' : 
+                                message.includes('⚠️') ? 'alert-warning' : 'alert-info'}`}>
+          {message}
+        </div>
+      )}
     </div>
   );
 }

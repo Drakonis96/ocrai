@@ -9,6 +9,7 @@ import Notifications from './components/Notifications';
 function App() {
   const [activeTab, setActiveTab] = useState('ocrAI');
   const [notifications, setNotifications] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleJobCompleted = (notification) => {
     setNotifications(prev => [...prev, notification]);
@@ -18,46 +19,89 @@ function App() {
     setNotifications([]);
   };
 
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    setSidebarOpen(false); // Close sidebar on mobile when tab is selected
+  };
+
+  const navigationItems = [
+    { id: 'ocrAI', label: 'OCR AI Processing', icon: '🤖', description: 'Upload and process documents with AI' },
+    { id: 'files', label: 'Processed Files', icon: '📁', description: 'View and manage processed files' },
+    { id: 'configurations', label: 'Settings', icon: '⚙️', description: 'Configure application settings' },
+    { id: 'txttopdf', label: 'TXT to PDF', icon: '📝', description: 'Convert text files to PDF' }
+  ];
+
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <div className="logo-container">
-          <img src="/logo.png" alt="Logo" className="app-logo" />
-          <h1 className="app-title">ocrAI</h1>
+    <div className="app">
+      {/* Mobile overlay */}
+      {sidebarOpen && <div className="sidebar-overlay" onClick={toggleSidebar}></div>}
+      
+      {/* Header */}
+      <header className="header">
+        <div className="header-content">
+          <button className="hamburger-menu" onClick={toggleSidebar}>
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <div className="logo-section">
+            <img src="/logo.png" alt="Logo" className="app-logo" />
+            <h1 className="app-title">ocrAI</h1>
+          </div>
+          <div className="header-actions">
+            <div className="notification-badge">
+              {notifications.length > 0 && (
+                <span className="badge">{notifications.length}</span>
+              )}
+            </div>
+          </div>
         </div>
       </header>
-      <nav className="app-nav">
-        <button
-          onClick={() => setActiveTab('ocrAI')}
-          className={activeTab === 'ocrAI' ? 'active tab-processing' : 'tab-processing'}
-        >
-          💡 ocrAI
-        </button>
-        <button
-          onClick={() => setActiveTab('files')}
-          className={activeTab === 'files' ? 'active tab-default' : 'tab-default'}
-        >
-          📁 Processed Files
-        </button>
-        <button
-          onClick={() => setActiveTab('configurations')}
-          className={activeTab === 'configurations' ? 'active tab-default' : 'tab-default'}
-        >
-          ⚙️ Configurations
-        </button>
-        <button
-          onClick={() => setActiveTab('txttopdf')}
-          className={activeTab === 'txttopdf' ? 'active tab-txttopdf' : 'tab-txttopdf'}
-        >
-          📝 TXT to PDF
-        </button>
-      </nav>
-      <main>
-        {activeTab === 'ocrAI' && <FileUpload onJobCompleted={handleJobCompleted} />}
-        {activeTab === 'files' && <FileList />}
-        {activeTab === 'configurations' && <Configurations />}
-        {activeTab === 'txttopdf' && <TxtToPdf />}
+
+      {/* Sidebar */}
+      <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        <nav className="sidebar-nav">
+          {navigationItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleTabChange(item.id)}
+              className={`nav-item ${activeTab === item.id ? 'nav-item-active' : ''}`}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <div className="nav-content">
+                <span className="nav-label">{item.label}</span>
+                <span className="nav-description">{item.description}</span>
+              </div>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Main Content */}
+      <main className="main-content">
+        <div className="page-container">
+          <div className="page-header">
+            <h2 className="page-title">
+              {navigationItems.find(item => item.id === activeTab)?.label}
+            </h2>
+            <p className="page-description">
+              {navigationItems.find(item => item.id === activeTab)?.description}
+            </p>
+          </div>
+          
+          <div className="page-content">
+            {activeTab === 'ocrAI' && <FileUpload onJobCompleted={handleJobCompleted} />}
+            {activeTab === 'files' && <FileList />}
+            {activeTab === 'configurations' && <Configurations />}
+            {activeTab === 'txttopdf' && <TxtToPdf />}
+          </div>
+        </div>
       </main>
+
       <Notifications notifications={notifications} onClear={clearNotifications} />
     </div>
   );
