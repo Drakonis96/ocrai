@@ -129,7 +129,7 @@ def compress_pdf_images(input_pdf, output_pdf, target_dpi=150, fmt='jpeg', quali
     import tempfile
     import subprocess
     import pikepdf
-    from pikepdf import PdfImage
+    from pikepdf import PdfImage, Name
 
     tmpdir = tempfile.mkdtemp()
     pdf = pikepdf.open(input_pdf)
@@ -176,9 +176,16 @@ def compress_pdf_images(input_pdf, output_pdf, target_dpi=150, fmt='jpeg', quali
                 else:
                     buf.seek(0)
 
-            # Replace the image stream with the optimized one
+            # Replace the image stream with the optimized one and update filters
             buf.seek(0)
-            page.images[name].stream = pikepdf.Stream(pdf, buf.read())
+            new_stream = pikepdf.Stream(pdf, buf.read())
+            page.images[name].stream = new_stream
+            if fmt.lower() == 'jpeg':
+                page.images[name]['/Filter'] = Name('/DCTDecode')
+                page.images[name]['/ColorSpace'] = Name('/DeviceRGB')
+            else:
+                page.images[name]['/Filter'] = Name('/FlateDecode')
+                # keep existing ColorSpace if present
             if keep_original:
                 pdf_img.extract_to(os.path.join(tmpdir, f"{name}_orig.png"))
 
