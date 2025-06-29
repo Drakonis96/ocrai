@@ -10,3 +10,6 @@ beautifulsoup4
 ocrmypdf>=15.0
 pluggy>=1.4
 markdown
+reportlab
+pymupdf
+img2pdf

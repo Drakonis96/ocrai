@@ -29,12 +29,13 @@ def update_progress(job_id, progress, status):
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
 
-def run_processing(job_id, file_path, api, model, mode, prompt_key):
+def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_settings=None):
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
             update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
-            is_cancelled=lambda: is_cancelled(job_id)
+            is_cancelled=lambda: is_cancelled(job_id),
+            compression_settings=compression_settings
         )
         active_jobs[job_id]["result"] = result
         update_progress(job_id, 100, "🎉 Process completed")
@@ -67,6 +68,17 @@ def upload_file():
     model = request.form.get('model')
     mode = request.form.get('mode')  # "OCR", "OCR + AI" or "AI"
     prompt_key = request.form.get('prompt_key')
+    
+    # Parse compression settings
+    compression_settings = None
+    if request.form.get('compression_enabled') == 'true':
+        compression_settings = {
+            'enabled': True,
+            'target_dpi': int(request.form.get('target_dpi', 150)),
+            'quality': int(request.form.get('quality', 85)),
+            'format': request.form.get('format', 'JPEG'),
+            'keep_original': request.form.get('keep_original') == 'true'
+        }
 
     if file.filename == '':
         return jsonify({"error": "Empty filename"}), 400
@@ -81,7 +93,7 @@ def upload_file():
     job_id = str(uuid.uuid4())
     active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None}
 
-    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key))
+    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression_settings))
     thread.start()
 
     return jsonify({"message": "File uploaded, processing started", "job_id": job_id})
@@ -174,7 +186,18 @@ def delete_prompt_endpoint(key):
 
 @app.route('/api/files', methods=['GET'])
 def list_files():
-    files = os.listdir(OUTPUT_FOLDER)
+    files = []
+    for filename in os.listdir(OUTPUT_FOLDER):
+        file_path = os.path.join(OUTPUT_FOLDER, filename)
+        if os.path.isfile(file_path):
+            stat = os.stat(file_path)
+            files.append({
+                "name": filename,
+                "size": stat.st_size,
+                "modified": stat.st_mtime
+            })
+    # Sort by modification time (newest first)
+    files.sort(key=lambda x: x['modified'], reverse=True)
     return jsonify({"files": files})
 
 @app.route('/api/files/<filename>', methods=['GET'])

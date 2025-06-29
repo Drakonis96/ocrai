@@ -2,38 +2,22 @@
 import React from 'react';
 
 function ProgressBar({ progress, status }) {
-  const containerStyle = {
-    height: '20px',
-    width: '100%',
-    backgroundColor: '#e0e0de',
-    borderRadius: '50px',
-    margin: '10px 0'
-  };
-
-  const fillerStyle = {
-    height: '100%',
-    width: `${progress}%`,
-    backgroundColor: progress === 100 ? 'green' : '#76c7c0',
-    borderRadius: 'inherit',
-    textAlign: 'right',
-    transition: 'width 0.5s ease-in-out'
-  };
-
-  const labelStyle = {
-    padding: '5px',
-    color: 'white',
-    fontWeight: 'bold'
-  };
-
   return (
-    <div>
-      <div style={containerStyle}>
-        <div style={fillerStyle}>
-          <span style={labelStyle}>{`${progress}%`}</span>
-        </div>
+    <div className="progress-wrapper">
+      <div className="progress-header">
+        <span className="progress-label">Processing Progress</span>
+        <span className="progress-percentage">{progress}%</span>
       </div>
+      
+      <div className="progress-container">
+        <div 
+          className="progress-bar"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      
       {status && (
-        <div style={{ marginTop: '5px', textAlign: 'center', fontWeight: 'bold', color: '#333' }}>
+        <div className="progress-text">
           {status}
         </div>
       )}
