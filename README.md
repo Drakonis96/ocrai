@@ -4,103 +4,77 @@
 
 # ocrAI 🤖
 
----
+A simple web app combining OCR, AI-assisted correction, translation and optional compression with an intuitive interface.
 
-🆕 **Enhanced OCR + AI Mode:**
-The AI-corrected text is now embedded directly into the PDF, preserving the original layout and positioning within the document.
+## Contents
+- [Features](#features)
+- [Installation](#installation)
+- [How to Use](#how-to-use)
+- [Screenshots](#screenshots)
+- [License](#license)
 
-📄 **New Output Format in Full AI OCR Mode:**
-The output is now a Markdown-formatted .txt file, structured with titles, subtitles, and page markers.
-This file can be converted directly within the app to a clean, paginated PDF, making it ideal for tasks like translating books while preserving formatting and pagination.
+## Features
+- **File Management**: upload PDFs or images, unique file names and one-click cleanup.
+- **OCR Processing Modes**
+  - **OCR (Tesseract Only)**: extract text and embed it into the PDF.
+  - **OCR + AI**: Tesseract followed by Gemini AI correction embedded into the PDF.
+  - **AI (Full AI OCR)**: Gemini AI processes each page and outputs Markdown.
+  - **Compression**: optional PDF or image compression after processing.
+  - All modes show real-time emoji progress.
+- **TXT to PDF**: convert TXT files into clean PDFs.
+- **Translation**: translate PDF or TXT documents page by page.
+- **Configuration**: manage prompts, models and languages.
 
----
+## Installation
 
-ocrAI is a simple web app that combines Optical Character Recognition (OCR) and Artificial Intelligence (AI) to process and translate documents. It offers an intuitive interface with real-time feedback and emoji progress.
+### Windows or macOS (Docker Desktop)
+1. Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+   Launch Docker Desktop once the installation completes.
+2. Download this repository:
+   - **Option A:** click the green **Code** button on GitHub and choose **Download ZIP**. Unzip the file anywhere you like.
+   - **Option B:** if you have Git installed, run:
+     ```bash
+     git clone https://github.com/Drakonis96/ocrai.git
+     ```
+3. Open the `ocrai` folder and edit the `docker-compose.yml` file with Notepad (Windows) or TextEdit (macOS).
+   Replace `your_gemini_api_key` with your own Gemini API key.
+4. Open a terminal inside this folder:
+   - **Windows:** right-click the folder and select **Open PowerShell window here**.
+   - **macOS:** open **Terminal**, then `cd` into the folder.
+5. Run the application:
+   ```bash
+   docker compose up --build
+   ```
+   The first run may take a few minutes while Docker downloads everything.
+6. When the terminal shows that the app is running, open your web browser at <http://localhost:5015>.
+7. To stop the app later, press `Ctrl+C` in the terminal and run `docker compose down`.
 
-## Key Features
+## How to Use
+### OCR Mode
+1. Go to the **OCR** tab.
+2. Upload a PDF or image.
+3. Select **OCR** and click **Upload and process**.
 
-- **File Management** 📤  
-  - Upload PDF or image files easily.
-  - Files are saved with unique names to avoid overwrites.
-  - Delete all files with one click (removes from both uploads and outputs).
+### OCR + AI Mode
+1. Go to the **OCR** tab.
+2. Upload a file and choose **OCR + AI**.
+3. Pick an AI prompt and start processing.
 
-- **OCR Processing Modes** 🔍  
-  - **OCR (Tesseract Only):**  
-    Extracts text with Tesseract and embeds it into the PDF using OCRmyPDF. The TXT file contains the raw OCR output.
-  - **OCR + AI (Tesseract + AI):**  
-    Uses Tesseract to extract text, then sends it to Gemini AI for correction and formatting. The corrected text is embedded directly into the resulting PDF, and a TXT file is also generated.
-  - **AI (Full AI OCR):**  
-    Uses Gemini AI to process the document page by page. Generates a TXT file in markdown format (with page markers and structure). This TXT can be converted to a PDF using the **TXT to PDF** tool in the app.
-  - All modes show real-time progress with emojis and run in the background.
+### AI Mode
+1. Go to the **OCR** tab.
+2. Upload a file and select **AI**.
+3. Choose a prompt and process the file.
+4. Convert the resulting Markdown TXT to PDF using the **TXT to PDF** tab if needed.
 
-- **TXT to PDF** 📝  
-  - Convert any TXT file (especially markdown from AI mode) to a clean, paginated PDF directly from the app.
+### Optional Compression
+1. Enable compression in the **OCR** tab.
+2. Adjust DPI, quality and format as desired.
+3. Process the file in any mode; the output will be compressed if enabled.
 
-- **Translation** 🌐  
-  - Translate PDF or TXT documents page by page.
-  - Progress updates are displayed, and a TXT file with the final translation (including page markers) is generated.
+## Screenshots
+![UI](screenshots/Screenshot%201.png)
+![Processing](screenshots/Screenshot%202.png)
+![Results](screenshots/Screenshot%203.png)
 
-- **Configuration** ⚙️  
-  - Manage and add new Gemini AI models and languages.
-  - Update or add custom prompts for OCR, correction, and translation.
-  - Download or upload the complete configuration (prompts and models).
-
-## How to Use the Application
-
-1. **Upload and Process Files:**
-   - Go to the **OCR** tab.
-   - Select your file (PDF or image).
-   - Choose one of the processing modes:
-     - **OCR** (Tesseract Only)
-     - **OCR + AI** (Tesseract + AI for correction and AI-embedded PDF)
-     - **AI** (Full AI OCR, generates markdown TXT)
-   - For AI modes, select the desired prompt.
-   - Click **Upload and process** and watch the real-time progress.
-   - If you used **AI** mode, you can convert the resulting TXT to PDF using the **TXT to PDF** tab.
-
-2. **Translate Documents:**
-   - Go to the **Translation** tab.
-   - Upload a new file or select one from the list of processed files.
-   - Choose the target language and translation prompt.
-   - Click **Translate** and observe the progress as each page is processed.
-   - The result is saved in a TXT file with page markers.
-
-3. **View Processed Files:**
-   - Go to the **Processed Files** tab.
-   - Download or delete files (with confirmation prompts).
-
-   **Note:** The Processed Files list is ordered from most recent to oldest (top = newest).
-
-4. **Configure the Application:**
-   - Go to the **Configurations** tab.
-   - Add, edit, or delete custom prompts.
-   - Manage Gemini models: add new models or delete existing ones.
-   - Configure languages and download or upload the complete configuration.
-
-5. **Convert TXT to PDF:**
-   - Go to the **TXT to PDF** tab.
-   - Select a TXT file (for example, one generated by AI mode).
-   - Click **Convert to PDF** to get a clean, paginated PDF.
-
-## How to Run ocrAI
-
-### Prerequisites
-- Docker
-- Docker Compose
-
-### Build and Run
-
-```bash
-docker-compose up --build
-```
-
-Then, open your browser at http://localhost:5015 to start using ocrAI.
-
----
-
-**Technologies Used**  
-Frontend: React, Axios  
-Backend: Flask, Python  
-OCR: Tesseract, pdf2image, OCRmyPDF  
-AI: Gemini API  
-Containerization: Docker, Docker Compose
+## License
+This project is licensed under the **GNU GENERAL PUBLIC LICENSE Version 3**. See the [LICENSE](LICENSE) file for details.
