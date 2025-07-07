@@ -22,6 +22,7 @@ A simple web app combining OCR, AI-assisted correction, translation and optional
 - **Compression**: optional PDF or image compression after processing.
 - All modes show real-time emoji progress.
 - **TXT to PDF**: convert text files (.txt or .md) into clean PDFs.
+- **Markdown to EPUB**: turn Markdown files into EPUB ebooks.
 - **Translation**: translate PDF or text documents page by page.
 - **Configuration**: manage prompts, models and languages.
 
@@ -65,6 +66,7 @@ A simple web app combining OCR, AI-assisted correction, translation and optional
 2. Upload a file and select **AI**.
 3. Choose a prompt and process the file.
 4. Convert the resulting Markdown text (.txt or .md) to PDF using the **TXT to PDF** tab if needed.
+5. Create an EPUB version using the **MD to EPUB** tab when desired.
 
 ### Optional Compression
 1. Enable compression in the **OCR** tab.

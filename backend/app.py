@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from models import get_models, add_model, get_languages, update_prompt, get_prompt, add_language, delete_prompt, custom_prompts, default_prompts
-from utils import process_file, translate_file_by_pages, convert_txt_to_pdf
+from utils import process_file, translate_file_by_pages, convert_txt_to_pdf, convert_md_to_epub
 import time
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -270,6 +270,21 @@ def txt_to_pdf_endpoint():
     try:
         pdf_path = convert_txt_to_pdf(txt_path)
         return jsonify({"message": "Text to PDF conversion completed", "pdf_file": os.path.basename(pdf_path)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/mdtoepub', methods=['POST'])
+def md_to_epub_endpoint():
+    data = request.get_json()
+    filename = data.get("filename")
+    if not filename:
+        return jsonify({"error": "Missing filename parameter"}), 400
+    md_path = os.path.join(OUTPUT_FOLDER, filename)
+    if not os.path.exists(md_path):
+        return jsonify({"error": "File not found"}), 404
+    try:
+        epub_path = convert_md_to_epub(md_path)
+        return jsonify({"message": "Markdown to EPUB conversion completed", "epub_file": os.path.basename(epub_path)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
