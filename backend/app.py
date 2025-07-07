@@ -29,13 +29,14 @@ def update_progress(job_id, progress, status):
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
 
-def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_settings=None):
+def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_settings=None, output_format="txt"):
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
             update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
             is_cancelled=lambda: is_cancelled(job_id),
-            compression_settings=compression_settings
+            compression_settings=compression_settings,
+            output_format=output_format
         )
         active_jobs[job_id]["result"] = result
         update_progress(job_id, 100, "🎉 Process completed")
@@ -68,6 +69,7 @@ def upload_file():
     model = request.form.get('model')
     mode = request.form.get('mode')  # "OCR", "OCR + AI" or "AI"
     prompt_key = request.form.get('prompt_key')
+    output_format = request.form.get('output_format', 'txt').lower()
     
     # Parse compression settings
     compression_settings = None
@@ -93,7 +95,7 @@ def upload_file():
     job_id = str(uuid.uuid4())
     active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None}
 
-    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression_settings))
+    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression_settings, output_format))
     thread.start()
 
     return jsonify({"message": "File uploaded, processing started", "job_id": job_id})
@@ -267,7 +269,7 @@ def txt_to_pdf_endpoint():
         return jsonify({"error": "File not found"}), 404
     try:
         pdf_path = convert_txt_to_pdf(txt_path)
-        return jsonify({"message": "TXT to PDF conversion completed", "pdf_file": os.path.basename(pdf_path)})
+        return jsonify({"message": "Text to PDF conversion completed", "pdf_file": os.path.basename(pdf_path)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

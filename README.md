@@ -19,10 +19,10 @@ A simple web app combining OCR, AI-assisted correction, translation and optional
   - **OCR (Tesseract Only)**: extract text and embed it into the PDF.
   - **OCR + AI**: Tesseract followed by Gemini AI correction embedded into the PDF.
   - **AI (Full AI OCR)**: Gemini AI processes each page and outputs Markdown.
-  - **Compression**: optional PDF or image compression after processing.
-  - All modes show real-time emoji progress.
-- **TXT to PDF**: convert TXT files into clean PDFs.
-- **Translation**: translate PDF or TXT documents page by page.
+- **Compression**: optional PDF or image compression after processing.
+- All modes show real-time emoji progress.
+- **TXT to PDF**: convert text files (.txt or .md) into clean PDFs.
+- **Translation**: translate PDF or text documents page by page.
 - **Configuration**: manage prompts, models and languages.
 
 ## Installation
@@ -64,7 +64,7 @@ A simple web app combining OCR, AI-assisted correction, translation and optional
 1. Go to the **OCR** tab.
 2. Upload a file and select **AI**.
 3. Choose a prompt and process the file.
-4. Convert the resulting Markdown TXT to PDF using the **TXT to PDF** tab if needed.
+4. Convert the resulting Markdown text (.txt or .md) to PDF using the **TXT to PDF** tab if needed.
 
 ### Optional Compression
 1. Enable compression in the **OCR** tab.

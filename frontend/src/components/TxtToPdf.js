@@ -19,30 +19,30 @@ function TxtToPdf() {
     try {
       const response = await axios.get(`${API_URL}/files`);
       const files = response.data.files
-        .filter(fileObj => fileObj.name.toLowerCase().endsWith('.txt'))
+        .filter(fileObj => fileObj.name.toLowerCase().endsWith('.txt') || fileObj.name.toLowerCase().endsWith('.md'))
         .map(fileObj => fileObj.name);
       setTxtFiles(files);
     } catch (err) {
       console.error(err);
-      setMessage("❌ Error loading TXT files.");
+      setMessage("❌ Error loading text files.");
     }
   };
 
   const handleConversion = async () => {
     if (!selectedFile) {
-      setMessage("⚠️ Please select a TXT file.");
+      setMessage("⚠️ Please select a text file (.txt or .md).");
       return;
     }
     
     setLoading(true);
-    setMessage("🔄 Converting TXT to PDF...");
+    setMessage("🔄 Converting text file to PDF...");
     
     try {
       const response = await axios.post(`${API_URL}/txttopdf`, { filename: selectedFile });
       setMessage(response.data.message);
       setPdfFile(response.data.pdf_file);
     } catch (err) {
-      setMessage("❌ Error converting TXT to PDF.");
+      setMessage("❌ Error converting text file to PDF.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -59,21 +59,21 @@ function TxtToPdf() {
     <div className="txt-to-pdf-container">
       <div className="card">
         <div className="card-header">
-          <h3 className="card-title">TXT to PDF Converter</h3>
+          <h3 className="card-title">Text to PDF Converter</h3>
           <p style={{ color: 'var(--gray-600)', fontSize: '0.875rem', margin: 0 }}>
             Convert your text files to PDF format
           </p>
         </div>
 
         <div className="form-group">
-          <label className="form-label">Select TXT File</label>
+          <label className="form-label">Select Text File</label>
           <select
             value={selectedFile}
             onChange={(e) => setSelectedFile(e.target.value)}
             className="form-select"
             disabled={loading}
           >
-            <option value="">-- Choose a TXT file --</option>
+            <option value="">-- Choose a text file --</option>
             {txtFiles.map((file, index) => (
               <option key={index} value={file}>{file}</option>
             ))}
@@ -85,7 +85,7 @@ function TxtToPdf() {
               margin: '0.5rem 0 0 0',
               fontStyle: 'italic' 
             }}>
-              No TXT files found. Process some documents first.
+              No text files found. Process some documents first.
             </p>
           )}
         </div>
@@ -149,9 +149,9 @@ function TxtToPdf() {
       {txtFiles.length === 0 && (
         <div className="empty-state">
           <div className="empty-state-icon">📝</div>
-          <h3 className="empty-state-title">No TXT files available</h3>
+          <h3 className="empty-state-title">No text files available</h3>
           <p className="empty-state-description">
-            Process some documents first to generate TXT files that can be converted to PDF
+            Process some documents first to generate text files that can be converted to PDF
           </p>
         </div>
       )}

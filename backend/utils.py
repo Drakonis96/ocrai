@@ -214,7 +214,7 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
     else:
         return "Unsupported file type for translation."
 
-def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled, compression_settings=None):
+def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled, compression_settings=None, output_format="txt"):
     if is_cancelled():
         update_progress(0, "⏹️ Process cancelled")
         return "Process cancelled."
@@ -319,7 +319,9 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
     update_progress(98, "📝 Saving results and finishing up...")
 
     if mode == "AI" and processed_text and processed_text.strip() and not processed_text.strip().startswith("❌") and processed_text.strip() != "Process cancelled.":
-        txt_file = os.path.join(OUTPUT_FOLDER, base_name + ".txt")
+        # Determine extension based on requested output format
+        ext = ".md" if str(output_format).lower() == "md" else ".txt"
+        txt_file = os.path.join(OUTPUT_FOLDER, base_name + ext)
         with open(txt_file, "w", encoding="utf-8") as f:
             f.write(processed_text)
 
