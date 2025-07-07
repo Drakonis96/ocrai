@@ -16,6 +16,14 @@ default_prompts = {
     "translation": (
         "Translate the following text to {target_language}. Your response must start with the translation. Return the translation in markdown format, using headings (#), lists, bold, etc. "
         "Each page must start with a markdown heading '# Page X'. Do not add comments or any extra formatting outside of markdown."
+    ),
+    # Prompt para extraer texto en modo eBook (ENGLISH)
+    "ebook_mode": (
+        "Perform OCR on the supplied image or PDF and output only the recognized text, formatted in valid Markdown. "
+        "Start your response with the OCR result. Use standard Markdown syntax for headings, bold, italics, and lists. "
+        "Preserve the original paragraph structure by merging hard-wrapped lines. Insert a single blank line between paragraphs and standalone titles; otherwise, write continuously. "
+        "Remove all page headers, footers, running heads, footnotes, page numbers, and end-of-line hyphens. "
+        "Output plain UTF-8 text only, with no comments, metadata, explanations, or leading/trailing spaces on any line."
     )
 }
 
