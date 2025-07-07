@@ -473,6 +473,91 @@ def convert_txt_to_pdf(txt_file_path):
     doc.build(flowables)
     return output_pdf
 
+def convert_md_to_epub(md_file_path):
+    """Convert a Markdown file to EPUB format.
+
+    The generated EPUB follows the minimum structure required by the
+    specification and preserves basic formatting such as headings,
+    paragraphs and lists.
+    """
+    import markdown
+    from zipfile import ZipFile, ZIP_DEFLATED, ZIP_STORED
+    import uuid
+
+    with open(md_file_path, "r", encoding="utf-8") as f:
+        md_text = f.read()
+
+    base_name = os.path.splitext(os.path.basename(md_file_path))[0]
+    epub_path = os.path.join(OUTPUT_FOLDER, base_name + ".epub")
+
+    os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+    html_body = markdown.markdown(md_text, output_format="xhtml1")
+
+    book_id = str(uuid.uuid4())
+
+    # XHTML content
+    index_xhtml = f"""<?xml version='1.0' encoding='utf-8'?>
+<html xmlns='http://www.w3.org/1999/xhtml'>
+  <head>
+    <title>{base_name}</title>
+  </head>
+  <body>
+  {html_body}
+  </body>
+</html>
+"""
+
+    # Minimal package file
+    content_opf = f"""<?xml version='1.0' encoding='utf-8'?>
+<package xmlns='http://www.idpf.org/2007/opf' unique-identifier='bookid' version='3.0'>
+  <metadata xmlns:dc='http://purl.org/dc/elements/1.1/'>
+    <dc:identifier id='bookid'>{book_id}</dc:identifier>
+    <dc:title>{base_name}</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id='content' href='index.xhtml' media-type='application/xhtml+xml'/>
+    <item id='toc' properties='nav' href='toc.xhtml' media-type='application/xhtml+xml'/>
+  </manifest>
+  <spine>
+    <itemref idref='content'/>
+  </spine>
+</package>
+"""
+
+    toc_xhtml = """<?xml version='1.0' encoding='utf-8'?>
+<html xmlns='http://www.w3.org/1999/xhtml' xmlns:epub='http://www.idpf.org/2007/ops'>
+  <head>
+    <title>Table of Contents</title>
+  </head>
+  <body>
+    <nav epub:type='toc'>
+      <ol>
+        <li><a href='index.xhtml'>Start</a></li>
+      </ol>
+    </nav>
+  </body>
+</html>
+"""
+
+    container_xml = """<?xml version='1.0'?>
+<container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>
+  <rootfiles>
+    <rootfile full-path='OEBPS/content.opf' media-type='application/oebps-package+xml'/>
+  </rootfiles>
+</container>
+"""
+
+    with ZipFile(epub_path, "w") as epub:
+        epub.writestr("mimetype", "application/epub+zip", compress_type=ZIP_STORED)
+        epub.writestr("META-INF/container.xml", container_xml, compress_type=ZIP_DEFLATED)
+        epub.writestr("OEBPS/index.xhtml", index_xhtml, compress_type=ZIP_DEFLATED)
+        epub.writestr("OEBPS/toc.xhtml", toc_xhtml, compress_type=ZIP_DEFLATED)
+        epub.writestr("OEBPS/content.opf", content_opf, compress_type=ZIP_DEFLATED)
+
+    return epub_path
+
 def compress_image(image, target_dpi=150, quality=85, format_type="JPEG"):
     """
     Compresses a PIL Image based on the specified parameters.

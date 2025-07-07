@@ -4,6 +4,7 @@ import FileUpload from './components/FileUpload';
 import FileList from './components/FileList';
 import Configurations from './components/Configurations';
 import TxtToPdf from './components/TxtToPdf';
+import MdToEpub from './components/MdToEpub';
 import Notifications from './components/Notifications';
 
 function App() {
@@ -32,7 +33,8 @@ function App() {
     { id: 'ocrAI', label: 'OCR AI Processing', icon: '🤖', description: 'Upload and process documents with AI' },
     { id: 'files', label: 'Processed Files', icon: '📁', description: 'View and manage processed files' },
     { id: 'configurations', label: 'Settings', icon: '⚙️', description: 'Configure application settings' },
-    { id: 'txttopdf', label: 'TXT to PDF', icon: '📝', description: 'Convert text files to PDF' }
+    { id: 'txttopdf', label: 'TXT to PDF', icon: '📝', description: 'Convert text files to PDF' },
+    { id: 'mdtoepub', label: 'MD to EPUB', icon: '📚', description: 'Convert Markdown files to EPUB' }
   ];
 
   return (
@@ -98,6 +100,7 @@ function App() {
             {activeTab === 'files' && <FileList />}
             {activeTab === 'configurations' && <Configurations />}
             {activeTab === 'txttopdf' && <TxtToPdf />}
+            {activeTab === 'mdtoepub' && <MdToEpub />}
           </div>
         </div>
       </main>
