@@ -36,6 +36,7 @@ function FileUpload({ onJobCompleted }) {
   const [quality, setQuality] = useState(85);
   const [format, setFormat] = useState('JPEG');
   const [keepOriginal, setKeepOriginal] = useState(false);
+  const [outputFormat, setOutputFormat] = useState('txt');
 
   const apis = ['Gemini'];
 
@@ -127,6 +128,7 @@ function FileUpload({ onJobCompleted }) {
     formData.append("model", model);
     formData.append("mode", mode);
     formData.append("prompt_key", promptToSend);
+    formData.append("output_format", outputFormat);
     
     // Add compression settings
     formData.append("compression_enabled", compressionEnabled.toString());
@@ -225,19 +227,32 @@ function FileUpload({ onJobCompleted }) {
 
           {/* Compression Settings */}
           <div className="form-group">
-            <CompressionSettings
-              compressionEnabled={compressionEnabled}
-              setCompressionEnabled={setCompressionEnabled}
-              targetDpi={targetDpi}
-              setTargetDpi={setTargetDpi}
-              quality={quality}
-              setQuality={setQuality}
-              format={format}
-              setFormat={setFormat}
-              keepOriginal={keepOriginal}
-              setKeepOriginal={setKeepOriginal}
-            />
-          </div>
+          <CompressionSettings
+            compressionEnabled={compressionEnabled}
+            setCompressionEnabled={setCompressionEnabled}
+            targetDpi={targetDpi}
+            setTargetDpi={setTargetDpi}
+            quality={quality}
+            setQuality={setQuality}
+            format={format}
+            setFormat={setFormat}
+            keepOriginal={keepOriginal}
+            setKeepOriginal={setKeepOriginal}
+          />
+        </div>
+
+        {/* Output Format */}
+        <div className="form-group">
+          <label className="form-label">Output Format</label>
+          <select
+            value={outputFormat}
+            onChange={e => setOutputFormat(e.target.value)}
+            className="form-select"
+          >
+            <option value="txt">.txt</option>
+            <option value="md">.md</option>
+          </select>
+        </div>
 
           {/* Processing Mode */}
           <div className="form-group">
