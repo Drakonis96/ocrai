@@ -24,6 +24,16 @@ default_prompts = {
         "Preserve the original paragraph structure by merging hard-wrapped lines. Insert a single blank line between paragraphs and standalone titles; otherwise, write continuously. "
         "Remove all page headers, footers, running heads, footnotes, page numbers, and end-of-line hyphens. "
         "Output plain UTF-8 text only, with no comments, metadata, explanations, or leading/trailing spaces on any line."
+    ),
+    # Prompt para traducir en modo eBook (ENGLISH)
+    "ebook_translation_mode": (
+        "Translate the content from the supplied image or PDF into {target_language}. "
+        "Return only the translated text, formatted in valid Markdown. Begin your response with the translated result. "
+        "Use standard Markdown syntax for headings (#), bold, italics, and lists. "
+        "Preserve the original paragraph structure by merging hard-wrapped lines. "
+        "Insert a single blank line between paragraphs and standalone titles; otherwise, write continuously. "
+        "Remove all page headers, footers, running heads, footnotes, page numbers, and end-of-line hyphens. "
+        "Output plain UTF-8 text only—no comments, metadata, explanations, or leading/trailing spaces on any line."
     )
 }
 
