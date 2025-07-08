@@ -3,7 +3,7 @@ import os
 import time
 import pytesseract
 from PIL import Image
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, pdfinfo_from_path
 import shutil
 import asyncio
 import uuid
@@ -38,8 +38,10 @@ def run_tesseract(file_path):
     extracted_text = ""
     if file_path.lower().endswith(".pdf"):
         try:
-            pages = convert_from_path(file_path)
-            for i, page in enumerate(pages, start=1):
+            info = pdfinfo_from_path(file_path)
+            total = int(info.get("Pages", 0))
+            for i in range(1, total + 1):
+                page = convert_from_path(file_path, first_page=i, last_page=i)[0]
                 page_text = pytesseract.image_to_string(page, lang='eng')
                 extracted_text += f"[Page {i:04d}]\n{page_text}\n\n"
         except Exception as e:
@@ -154,21 +156,23 @@ def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_can
     final_text = ""
     if file_path.lower().endswith(".pdf"):
         try:
-            pages = convert_from_path(file_path)
+            info = pdfinfo_from_path(file_path)
+            total = int(info.get("Pages", 0))
         except Exception as e:
             return f"❌ Error processing PDF: {str(e)}"
-        total = len(pages)
-        for i, page in enumerate(pages, start=1):
+        for i in range(1, total + 1):
             if is_cancelled():
                 update_progress(0, "⏹️ Process cancelled", current_page=i, total_pages=total)
                 return "Process cancelled."
+            page = convert_from_path(file_path, first_page=i, last_page=i)[0]
             temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{uuid.uuid4().hex}.png")
             page.save(temp_filename, "PNG")
-            update_progress(int((i-1)/total*100), f"🔍 Processing page {i} of {total} (AI OCR)", current_page=i, total_pages=total)
+            progress_start = round((i - 1) / total * 100, 2)
+            update_progress(progress_start, f"🔍 Processing page {i} of {total} (AI OCR)", current_page=i, total_pages=total)
             page_text = call_api_ocr(api, model, temp_filename, prompt_key)
             final_text += f"[Page {i:04d}]\n{page_text}\n\n"
             os.remove(temp_filename)
-            progress = int((i / total) * 100)
+            progress = round(i / total * 100, 2)
             update_progress(progress, f"✅ Page {i} of {total} processed (AI OCR)", current_page=i, total_pages=total)
             time.sleep(1)
         update_progress(100, "🎉 AI OCR completed", current_page=total, total_pages=total)
@@ -184,22 +188,24 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
     final_translation = ""
     if file_path.lower().endswith(".pdf"):
         try:
-            pages = convert_from_path(file_path)
+            info = pdfinfo_from_path(file_path)
+            total = int(info.get("Pages", 0))
         except Exception as e:
             return f"❌ Error processing PDF: {str(e)}"
-        total = len(pages)
-        for i, page in enumerate(pages, start=1):
+        for i in range(1, total + 1):
             if is_cancelled():
                 update_progress(0, "⏹️ Process cancelled", current_page=i, total_pages=total)
                 return "Process cancelled."
+            page = convert_from_path(file_path, first_page=i, last_page=i)[0]
             temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{uuid.uuid4().hex}.png")
             page.save(temp_filename, "PNG")
-            update_progress(int((i-1)/total*100), f"🌐 Translating page {i} of {total}", current_page=i, total_pages=total)
+            progress_start = round((i - 1) / total * 100, 2)
+            update_progress(progress_start, f"🌐 Translating page {i} of {total}", current_page=i, total_pages=total)
             page_text = pytesseract.image_to_string(page, lang='eng')
             translated_page = call_api_translation(api, model, page_text, target_language, prompt_key)
             final_translation += f"# Page {i}\n{translated_page}\n\n"
             os.remove(temp_filename)
-            progress = int((i / total) * 100)
+            progress = round(i / total * 100, 2)
             update_progress(progress, f"✅ Page {i} of {total} translated", current_page=i, total_pages=total)
             time.sleep(1)
         update_progress(100, "🎉 Translation completed", current_page=total, total_pages=total)
