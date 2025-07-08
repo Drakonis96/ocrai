@@ -20,11 +20,15 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Global dictionary for background jobs
-active_jobs = {}  # job_id: {"progress": int, "status": str, "cancelled": bool, "result": any}
+active_jobs = {}  # job_id: {"progress": int, "status": str, "cancelled": bool, "result": any, "current_page": int, "total_pages": int}
 
-def update_progress(job_id, progress, status):
+def update_progress(job_id, progress, status, current_page=None, total_pages=None):
     active_jobs[job_id]["progress"] = progress
     active_jobs[job_id]["status"] = status
+    if current_page is not None:
+        active_jobs[job_id]["current_page"] = current_page
+    if total_pages is not None:
+        active_jobs[job_id]["total_pages"] = total_pages
 
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
@@ -33,7 +37,7 @@ def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
-            update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
+            update_progress=lambda prog, stat, cur=None, total=None: update_progress(job_id, prog, stat, cur, total),
             is_cancelled=lambda: is_cancelled(job_id),
             compression_settings=compression_settings,
             output_format=output_format
@@ -47,7 +51,7 @@ def run_translation(job_id, file_path, api, model, target_language, prompt_key):
     try:
         result = translate_file_by_pages(
             file_path, api, model, target_language, prompt_key,
-            update_progress=lambda prog, stat: update_progress(job_id, prog, stat),
+            update_progress=lambda prog, stat, cur=None, total=None: update_progress(job_id, prog, stat, cur, total),
             is_cancelled=lambda: is_cancelled(job_id)
         )
         base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -93,7 +97,7 @@ def upload_file():
     file.save(file_path)
 
     job_id = str(uuid.uuid4())
-    active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None}
+    active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None, "current_page": 0, "total_pages": 0}
 
     thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression_settings, output_format))
     thread.start()
@@ -106,7 +110,9 @@ def get_progress(job_id):
         return jsonify({
             "progress": active_jobs[job_id]["progress"],
             "status": active_jobs[job_id]["status"],
-            "result": active_jobs[job_id]["result"]
+            "result": active_jobs[job_id]["result"],
+            "current_page": active_jobs[job_id].get("current_page", 0),
+            "total_pages": active_jobs[job_id].get("total_pages", 0)
         })
     else:
         return jsonify({"error": "Job not found"}), 404
