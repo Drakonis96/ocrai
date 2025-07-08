@@ -29,7 +29,7 @@ def encode_image(file_path):
     with open(file_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
 
-def run_tesseract(file_path):
+def run_tesseract(file_path, prompt_key=""):
     """
     Si el archivo es un PDF, se realiza OCR página a página añadiendo al principio de cada una
     la cabecera con el formato [Page 0001], [Page 0002], etc.
@@ -43,7 +43,10 @@ def run_tesseract(file_path):
             for i in range(1, total + 1):
                 page = convert_from_path(file_path, first_page=i, last_page=i)[0]
                 page_text = pytesseract.image_to_string(page, lang='eng')
-                extracted_text += f"[Page {i:04d}]\n{page_text}\n\n"
+                if "ebook" not in prompt_key.lower():
+                    extracted_text += f"[Page {i:04d}]\n{page_text}\n\n"
+                else:
+                    extracted_text += f"{page_text}\n\n"
         except Exception as e:
             extracted_text = f"❌ Error processing PDF: {str(e)}"
     else:
@@ -52,7 +55,12 @@ def run_tesseract(file_path):
     return extracted_text
 
 def call_api_correction(api, model, text, prompt_key="ocr_correction"):
-    prompt = get_prompt(prompt_key) + text
+    # Add unique identifier to prevent caching issues
+    unique_id = str(uuid.uuid4())[:8]
+    timestamp = int(time.time())
+    
+    prompt = get_prompt(prompt_key) + text + f"\n\n[Correction ID: {unique_id}_{timestamp}]"
+    
     try:
         from google import genai
     except ImportError:
@@ -62,7 +70,10 @@ def call_api_correction(api, model, text, prompt_key="ocr_correction"):
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+    
+    # Create a new client instance for each request to prevent caching issues
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    
     response = client.models.generate_content(model=model, contents=[prompt])
     return response.text
 
@@ -76,15 +87,44 @@ def call_api_ocr(api, model, file_path, prompt_key="ocr"):
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+    
+    # Create a new client instance for each request to prevent caching issues
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    
+    # Upload file with unique naming to prevent cache issues
     file_ref = client.files.upload(file=file_path)
+    
+    # Add a small delay to ensure file is fully uploaded
+    time.sleep(0.5)
+    
+    # Get prompt and add unique identifier to prevent caching
     prompt = get_prompt(prompt_key)
-    response = client.models.generate_content(model=model, contents=[file_ref, prompt])
+    unique_id = str(uuid.uuid4())[:8]
+    prompt_with_id = f"{prompt}\n\n[Processing ID: {unique_id}]"
+    
+    # Generate content with anti-cache measures
+    response = client.models.generate_content(
+        model=model, 
+        contents=[file_ref, prompt_with_id]
+    )
+    
+    # Clean up the uploaded file reference to prevent memory issues
+    try:
+        client.files.delete(file_ref.name)
+    except:
+        pass  # File cleanup is optional, API will handle it eventually
+    
     return response.text
 
 def call_api_translation(api, model, text, target_language, prompt_key="translation"):
     prompt_template = get_prompt(prompt_key)
-    prompt = prompt_template.format(target_language=target_language) + text
+    
+    # Add unique identifier to prevent caching issues
+    unique_id = str(uuid.uuid4())[:8]
+    timestamp = int(time.time())
+    
+    prompt = prompt_template.format(target_language=target_language) + text + f"\n\n[Translation ID: {unique_id}_{timestamp}]"
+    
     try:
         from google import genai
     except ImportError:
@@ -94,7 +134,10 @@ def call_api_translation(api, model, text, target_language, prompt_key="translat
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+    
+    # Create a new client instance for each request to prevent caching issues
     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    
     response = client.models.generate_content(model=model, contents=[prompt])
     return response.text
 
@@ -160,21 +203,57 @@ def ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_can
             total = int(info.get("Pages", 0))
         except Exception as e:
             return f"❌ Error processing PDF: {str(e)}"
+        
         for i in range(1, total + 1):
             if is_cancelled():
                 update_progress(0, "⏹️ Process cancelled", current_page=i, total_pages=total)
                 return "Process cancelled."
+            
+            # Convert page to image
             page = convert_from_path(file_path, first_page=i, last_page=i)[0]
-            temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{uuid.uuid4().hex}.png")
+            
+            # Create unique temp filename to prevent caching issues
+            temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{i}_{uuid.uuid4().hex}_{int(time.time())}.png")
             page.save(temp_filename, "PNG")
+            
             progress_start = round((i - 1) / total * 100, 2)
             update_progress(progress_start, f"🔍 Processing page {i} of {total} (AI OCR)", current_page=i, total_pages=total)
-            page_text = call_api_ocr(api, model, temp_filename, prompt_key)
-            final_text += f"[Page {i:04d}]\n{page_text}\n\n"
-            os.remove(temp_filename)
+            
+            # Process page with retry logic for cache issues
+            max_retries = 3
+            retry_count = 0
+            page_text = ""
+            
+            while retry_count < max_retries:
+                try:
+                    page_text = call_api_ocr(api, model, temp_filename, prompt_key)
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        update_progress(progress_start, f"⚠️ Retry {retry_count}/{max_retries} for page {i} (cache issue)", current_page=i, total_pages=total)
+                        time.sleep(2)  # Wait before retry
+                    else:
+                        page_text = f"❌ Error processing page {i}: {str(e)}"
+                        break
+            
+            if "ebook" not in prompt_key.lower():
+                final_text += f"[Page {i:04d}]\n{page_text}\n\n"
+            else:
+                final_text += f"{page_text}\n\n"
+            
+            # Clean up temp file immediately after processing
+            try:
+                os.remove(temp_filename)
+            except:
+                pass  # File cleanup is optional
+            
             progress = round(i / total * 100, 2)
             update_progress(progress, f"✅ Page {i} of {total} processed (AI OCR)", current_page=i, total_pages=total)
-            time.sleep(1)
+            
+            # Add delay between pages to prevent API rate limiting and cache issues
+            time.sleep(1.5)
+            
         update_progress(100, "🎉 AI OCR completed", current_page=total, total_pages=total)
         return final_text
     else:
@@ -192,22 +271,56 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
             total = int(info.get("Pages", 0))
         except Exception as e:
             return f"❌ Error processing PDF: {str(e)}"
+        
         for i in range(1, total + 1):
             if is_cancelled():
                 update_progress(0, "⏹️ Process cancelled", current_page=i, total_pages=total)
                 return "Process cancelled."
+            
             page = convert_from_path(file_path, first_page=i, last_page=i)[0]
-            temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_page_{uuid.uuid4().hex}.png")
+            
+            # Create unique temp filename to prevent caching issues
+            temp_filename = os.path.join(OUTPUT_FOLDER, f"temp_translate_{i}_{uuid.uuid4().hex}_{int(time.time())}.png")
             page.save(temp_filename, "PNG")
+            
             progress_start = round((i - 1) / total * 100, 2)
             update_progress(progress_start, f"🌐 Translating page {i} of {total}", current_page=i, total_pages=total)
+            
+            # Extract text from page
             page_text = pytesseract.image_to_string(page, lang='eng')
-            translated_page = call_api_translation(api, model, page_text, target_language, prompt_key)
+            
+            # Translate with retry logic for cache issues
+            max_retries = 3
+            retry_count = 0
+            translated_page = ""
+            
+            while retry_count < max_retries:
+                try:
+                    translated_page = call_api_translation(api, model, page_text, target_language, prompt_key)
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        update_progress(progress_start, f"⚠️ Retry {retry_count}/{max_retries} for page {i} translation", current_page=i, total_pages=total)
+                        time.sleep(2)  # Wait before retry
+                    else:
+                        translated_page = f"❌ Error translating page {i}: {str(e)}"
+                        break
+            
             final_translation += f"# Page {i}\n{translated_page}\n\n"
-            os.remove(temp_filename)
+            
+            # Clean up temp file immediately after processing
+            try:
+                os.remove(temp_filename)
+            except:
+                pass  # File cleanup is optional
+            
             progress = round(i / total * 100, 2)
             update_progress(progress, f"✅ Page {i} of {total} translated", current_page=i, total_pages=total)
-            time.sleep(1)
+            
+            # Add delay between pages to prevent API rate limiting and cache issues
+            time.sleep(1.5)
+            
         update_progress(100, "🎉 Translation completed", current_page=total, total_pages=total)
         return final_translation
     elif file_path.lower().endswith(".txt"):
@@ -232,7 +345,7 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
     
     if mode == "OCR":
         update_progress(15, "🔍 Running OCR...")
-        processed_text = run_tesseract(file_path)
+        processed_text = run_tesseract(file_path, prompt_key)
         if is_cancelled():
             update_progress(15, "⏹️ Process cancelled")
             return "Process cancelled."
@@ -249,7 +362,7 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
                 final_pdf_path = pdf_output
     elif mode == "OCR + AI":
         update_progress(20, "🔍 Running Gemini OCR...")
-        tesseract_text = run_tesseract(file_path)
+        tesseract_text = run_tesseract(file_path, prompt_key)
         update_progress(35, "🤖 Correcting text with AI...")
         processed_text = call_api_correction(api, model, tesseract_text, prompt_key="ocr_correction")
         update_progress(50, "✅ Tesseract + AI completed.")
@@ -271,7 +384,7 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
                 final_pdf_path = pdf_output
     elif mode == "AI":
         update_progress(20, "📂 File ready for full Gemini processing...")
-        processed_text = call_api_ocr(api, model, file_path, prompt_key)
+        processed_text = ocr_file_by_pages(file_path, api, model, prompt_key, update_progress, is_cancelled)
     else:
         processed_text = "Unrecognized processing mode."
         update_progress(25, "❌ Error: Unrecognized mode.")

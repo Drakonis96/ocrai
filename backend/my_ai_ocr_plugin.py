@@ -21,9 +21,17 @@ def _correct_hocr_with_ai(hocr_html: str, prompt_key="ocr_correction",
     4) Devuelve el HOCR corregido.
     """
     import re
+    import uuid
+    import time
+    
     soup = bs4.BeautifulSoup(hocr_html, "html.parser")
     words = [span.get_text() for span in soup.select("span.ocrx_word")]
     chunk = "\n".join(words)
+    
+    # Add unique identifier to prevent caching issues
+    unique_id = str(uuid.uuid4())[:8]
+    timestamp = int(time.time())
+    
     prompt = (
         get_prompt(prompt_key) +
         "\n---\n"
@@ -32,10 +40,29 @@ def _correct_hocr_with_ai(hocr_html: str, prompt_key="ocr_correction",
         "DEVUELVE_LA_MISMA_CANTIDAD_DE_PALABRAS_CORREGIDAS,"
         "EN_EL_MISMO_ORDEN,UNA_POR_LÍNEA_Y_NADA_MÁS."
         "NO_INCLUYAS_ETIQUETAS_HTML,_SOLO_TEXTO_PLANO."
+        f"\n[Processing ID: {unique_id}_{timestamp}]"
     )
+    
     from google import genai
+    
+    # Create new client instance for each request to prevent caching
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    rsp = client.models.generate_content(model=model, contents=[prompt])
+    
+    # Add retry logic for cache issues
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            rsp = client.models.generate_content(model=model, contents=[prompt])
+            break  # Success, exit retry loop
+        except Exception as e:
+            retry_count += 1
+            if retry_count < max_retries:
+                time.sleep(2)  # Wait before retry
+            else:
+                # If all retries fail, return original text
+                return hocr_html
     
     # Clean the AI response to ensure no HTML tags are included
     corrected_text = rsp.text

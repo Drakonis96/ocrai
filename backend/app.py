@@ -23,6 +23,8 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 active_jobs = {}  # job_id: {"progress": int, "status": str, "cancelled": bool, "result": any, "current_page": int, "total_pages": int}
 
 def update_progress(job_id, progress, status, current_page=None, total_pages=None):
+    if job_id not in active_jobs:
+        return
     active_jobs[job_id]["progress"] = progress
     active_jobs[job_id]["status"] = status
     if current_page is not None:
@@ -37,7 +39,7 @@ def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
-            update_progress=lambda prog, stat, cur=None, total=None: update_progress(job_id, prog, stat, cur, total),
+            update_progress=lambda progress, status, current_page=None, total_pages=None: update_progress(job_id, progress, status, current_page, total_pages),
             is_cancelled=lambda: is_cancelled(job_id),
             compression_settings=compression_settings,
             output_format=output_format
