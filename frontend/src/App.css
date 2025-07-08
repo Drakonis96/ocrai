@@ -609,6 +609,13 @@ body {
   font-size: 0.875rem;
 }
 
+.progress-pages {
+  font-size: 0.75rem;
+  color: var(--gray-600);
+  text-align: center;
+  margin-top: 0.25rem;
+}
+
 /* File List Styles */
 .file-list-container {
   display: grid;

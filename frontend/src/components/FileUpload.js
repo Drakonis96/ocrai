@@ -27,6 +27,8 @@ function FileUpload({ onJobCompleted }) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [message, setMessage] = useState('');
   const [jobId, setJobId] = useState(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [targetLanguage, setTargetLanguage] = useState(DEFAULT_LANGUAGES[0]);
   const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
   
@@ -72,10 +74,18 @@ function FileUpload({ onJobCompleted }) {
             const data = response.data;
             setUploadProgress(data.progress);
             setMessage(data.status);
+            if (data.current_page !== undefined) {
+              setCurrentPage(data.current_page);
+            }
+            if (data.total_pages !== undefined) {
+              setTotalPages(data.total_pages);
+            }
             if (data.progress === 100 || data.status.includes("Cancelled") || data.status.includes("Error")) {
               clearInterval(interval);
               onJobCompleted && onJobCompleted("Processing job completed");
               setJobId(null);
+              setCurrentPage(0);
+              setTotalPages(0);
             }
           })
           .catch(err => console.error(err));
@@ -102,6 +112,8 @@ function FileUpload({ onJobCompleted }) {
         .then(response => {
           setMessage("⏹️ Process stopped by user");
           setJobId(null);
+          setCurrentPage(0);
+          setTotalPages(0);
         })
         .catch(err => console.error(err));
     }
@@ -142,6 +154,9 @@ function FileUpload({ onJobCompleted }) {
     if (mode === 'translation' || mode === 'TRANSLATION' || promptKey === 'translation') {
       formData.append("target_language", targetLanguage);
     }
+
+    setCurrentPage(0);
+    setTotalPages(0);
 
     axios.post(`${API_URL}/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } })
       .then(response => {
@@ -361,7 +376,12 @@ function FileUpload({ onJobCompleted }) {
           <div className="card-header">
             <h3 className="card-title">Processing Status</h3>
           </div>
-          <ProgressBar progress={uploadProgress} status={message} />
+          <ProgressBar
+            progress={uploadProgress}
+            status={message}
+            currentPage={currentPage}
+            totalPages={totalPages}
+          />
         </div>
       )}
 
