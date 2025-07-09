@@ -35,7 +35,7 @@ def update_progress(job_id, progress, status, current_page=None, total_pages=Non
 def is_cancelled(job_id):
     return active_jobs[job_id]["cancelled"]
 
-def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_settings=None, output_format="txt"):
+def run_processing(job_id, file_path, api, model, mode, prompt_key, compression_settings=None, output_format="md"):
     try:
         result = process_file(
             file_path, api, model, mode, prompt_key,
@@ -75,7 +75,7 @@ def upload_file():
     model = request.form.get('model')
     mode = request.form.get('mode')  # "OCR", "OCR + AI" or "AI"
     prompt_key = request.form.get('prompt_key')
-    output_format = request.form.get('output_format', 'txt').lower()
+    output_format = request.form.get('output_format', 'md').lower()
     
     # Parse compression settings
     compression_settings = None

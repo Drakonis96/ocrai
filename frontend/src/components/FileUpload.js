@@ -38,7 +38,7 @@ function FileUpload({ onJobCompleted }) {
   const [quality, setQuality] = useState(85);
   const [format, setFormat] = useState('JPEG');
   const [keepOriginal, setKeepOriginal] = useState(false);
-  const [outputFormat, setOutputFormat] = useState('txt');
+  const [outputFormat, setOutputFormat] = useState('md');
 
   const apis = ['Gemini'];
 
