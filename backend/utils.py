@@ -333,7 +333,7 @@ def translate_file_by_pages(file_path, api, model, target_language, prompt_key, 
     else:
         return "Unsupported file type for translation."
 
-def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled, compression_settings=None, output_format="txt"):
+def process_file(file_path, api, model, mode, prompt_key, update_progress, is_cancelled, compression_settings=None, output_format="md"):
     if is_cancelled():
         update_progress(0, "⏹️ Process cancelled")
         return "Process cancelled."
