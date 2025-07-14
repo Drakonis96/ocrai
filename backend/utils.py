@@ -441,6 +441,7 @@ def process_file(file_path, api, model, mode, prompt_key, update_progress, is_ca
         # Determine extension based on requested output format
         ext = ".md" if str(output_format).lower() == "md" else ".txt"
         txt_file = os.path.join(OUTPUT_FOLDER, base_name + ext)
+        processed_text = sanitize_markdown_tags(processed_text)
         with open(txt_file, "w", encoding="utf-8") as f:
             f.write(processed_text)
 
@@ -501,6 +502,22 @@ def organize_paragraphs(text):
             paragraphs.append(new_block.strip())
     return paragraphs
 
+def sanitize_markdown_tags(text):
+    """Post-process Markdown text to avoid tag mismatches."""
+    # Remove any HTML tags that might be present
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # Ensure common Markdown delimiters are balanced
+    def balance(token, src):
+        if src.count(token) % 2 != 0:
+            return src + token
+        return src
+
+    for token in ('```', '**', '__', '*', '_'):
+        text = balance(token, text)
+
+    return text
+
 def convert_markdown_to_flowables(markdown_text, styles, header_styles, normal_style, max_chars_per_page=1800):
     """
     Convierte un bloque de Markdown en una lista de flowables para ReportLab.
@@ -538,6 +555,7 @@ def convert_txt_to_pdf(txt_file_path):
     from bs4 import BeautifulSoup
     with open(txt_file_path, "r", encoding="utf-8") as f:
         content = f.read()
+    content = sanitize_markdown_tags(content)
 
     base_name = os.path.splitext(os.path.basename(txt_file_path))[0]
     output_pdf = os.path.join(OUTPUT_FOLDER, base_name + "_txt.pdf")
@@ -605,6 +623,7 @@ def convert_md_to_epub(md_file_path):
 
     with open(md_file_path, "r", encoding="utf-8") as f:
         md_text = f.read()
+    md_text = sanitize_markdown_tags(md_text)
 
     base_name = os.path.splitext(os.path.basename(md_file_path))[0]
     epub_path = os.path.join(OUTPUT_FOLDER, base_name + ".epub")
