@@ -5,6 +5,7 @@ import FileList from './components/FileList';
 import Configurations from './components/Configurations';
 import TxtToPdf from './components/TxtToPdf';
 import MdToEpub from './components/MdToEpub';
+import JobQueue from './components/JobQueue';
 import Notifications from './components/Notifications';
 
 function App() {
@@ -34,7 +35,8 @@ function App() {
     { id: 'files', label: 'Processed Files', icon: '📁', description: 'View and manage processed files' },
     { id: 'configurations', label: 'Settings', icon: '⚙️', description: 'Configure application settings' },
     { id: 'txttopdf', label: 'TXT to PDF', icon: '📝', description: 'Convert text files to PDF' },
-    { id: 'mdtoepub', label: 'MD to EPUB', icon: '📚', description: 'Convert Markdown files to EPUB' }
+    { id: 'mdtoepub', label: 'MD to EPUB', icon: '📚', description: 'Convert Markdown files to EPUB' },
+    { id: 'queue', label: 'Task Queue', icon: '⏳', description: 'View processing tasks' }
   ];
 
   return (
@@ -101,6 +103,7 @@ function App() {
             {activeTab === 'configurations' && <Configurations />}
             {activeTab === 'txttopdf' && <TxtToPdf />}
             {activeTab === 'mdtoepub' && <MdToEpub />}
+            {activeTab === 'queue' && <JobQueue />}
           </div>
         </div>
       </main>
