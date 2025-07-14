@@ -34,6 +34,15 @@ default_prompts = {
         "Insert a single blank line between paragraphs and standalone titles; otherwise, write continuously. "
         "Remove all page headers, footers, running heads, footnotes, page numbers, and end-of-line hyphens. "
         "Output plain UTF-8 text only—no comments, metadata, explanations, or leading/trailing spaces on any line."
+    ),
+    # Prompt en español para traducción directa de imágenes o PDFs
+    "traduccion_espanol": (
+        "Traduce el contenido de la imagen o PDF proporcionado al español. Devuelve únicamente el texto traducido, con formato válido en Markdown. "
+        "Comienza tu respuesta con el resultado traducido. Usa la sintaxis estándar de Markdown para títulos (#), negrita, cursiva y listas. "
+        "Conserva la estructura original de los párrafos, fusionando las líneas cortadas artificialmente. "
+        "Deja una línea en blanco entre títulos independientes y párrafos; por lo demás, escribe de forma continua. "
+        "Elimina todos los encabezados de página, pies de página, cabeceras repetidas, notas al pie, números de página y guiones de final de línea. "
+        "Salida solo en texto plano codificado en UTF-8, sin comentarios, metadatos, explicaciones ni espacios adicionales al principio o al final de ninguna línea."
     )
 }
 
