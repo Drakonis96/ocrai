@@ -7,6 +7,7 @@ const API_URL = '/api';
 function MdToEpub() {
   const [mdFiles, setMdFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
+  const [uploadFile, setUploadFile] = useState(null);
   const [message, setMessage] = useState('');
   const [epubFile, setEpubFile] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,8 +30,8 @@ function MdToEpub() {
   };
 
   const handleConversion = async () => {
-    if (!selectedFile) {
-      setMessage('⚠️ Please select a Markdown file.');
+    if (!selectedFile && !uploadFile) {
+      setMessage('⚠️ Please select or upload a Markdown file.');
       return;
     }
 
@@ -38,7 +39,16 @@ function MdToEpub() {
     setMessage('🔄 Converting Markdown to EPUB...');
 
     try {
-      const res = await axios.post(`${API_URL}/mdtoepub`, { filename: selectedFile });
+      let res;
+      if (uploadFile) {
+        const formData = new FormData();
+        formData.append('file', uploadFile);
+        res = await axios.post(`${API_URL}/mdtoepub`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      } else {
+        res = await axios.post(`${API_URL}/mdtoepub`, { filename: selectedFile });
+      }
       setMessage(res.data.message);
       setEpubFile(res.data.epub_file);
     } catch (err) {
@@ -46,6 +56,7 @@ function MdToEpub() {
       setMessage('❌ Error converting Markdown to EPUB.');
     } finally {
       setLoading(false);
+      setUploadFile(null);
     }
   };
 
@@ -90,11 +101,21 @@ function MdToEpub() {
           )}
         </div>
 
+        <div className="form-group">
+          <label className="form-label">Or Upload File</label>
+          <input
+            type="file"
+            accept=".md"
+            onChange={(e) => setUploadFile(e.target.files[0])}
+            disabled={loading}
+          />
+        </div>
+
         <div className="form-actions">
           <button
             onClick={handleConversion}
             className="btn btn-primary"
-            disabled={!selectedFile || loading}
+            disabled={(!selectedFile && !uploadFile) || loading}
           >
             {loading ? (
               <>
