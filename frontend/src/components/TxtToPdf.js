@@ -7,6 +7,7 @@ const API_URL = '/api';
 function TxtToPdf() {
   const [txtFiles, setTxtFiles] = useState([]);
   const [selectedFile, setSelectedFile] = useState('');
+  const [uploadFile, setUploadFile] = useState(null);
   const [message, setMessage] = useState('');
   const [pdfFile, setPdfFile] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,16 +30,25 @@ function TxtToPdf() {
   };
 
   const handleConversion = async () => {
-    if (!selectedFile) {
-      setMessage("⚠️ Please select a text file (.txt or .md).");
+    if (!selectedFile && !uploadFile) {
+      setMessage("⚠️ Please select or upload a text file.");
       return;
     }
-    
+
     setLoading(true);
     setMessage("🔄 Converting text file to PDF...");
-    
+
     try {
-      const response = await axios.post(`${API_URL}/txttopdf`, { filename: selectedFile });
+      let response;
+      if (uploadFile) {
+        const formData = new FormData();
+        formData.append('file', uploadFile);
+        response = await axios.post(`${API_URL}/txttopdf`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      } else {
+        response = await axios.post(`${API_URL}/txttopdf`, { filename: selectedFile });
+      }
       setMessage(response.data.message);
       setPdfFile(response.data.pdf_file);
     } catch (err) {
@@ -46,6 +56,7 @@ function TxtToPdf() {
       console.error(err);
     } finally {
       setLoading(false);
+      setUploadFile(null);
     }
   };
 
@@ -79,22 +90,32 @@ function TxtToPdf() {
             ))}
           </select>
           {txtFiles.length === 0 && (
-            <p style={{ 
-              fontSize: '0.875rem', 
-              color: 'var(--gray-500)', 
+            <p style={{
+              fontSize: '0.875rem',
+              color: 'var(--gray-500)',
               margin: '0.5rem 0 0 0',
-              fontStyle: 'italic' 
+              fontStyle: 'italic'
             }}>
               No text files found. Process some documents first.
             </p>
           )}
         </div>
 
+        <div className="form-group">
+          <label className="form-label">Or Upload File</label>
+          <input
+            type="file"
+            accept=".txt,.md"
+            onChange={(e) => setUploadFile(e.target.files[0])}
+            disabled={loading}
+          />
+        </div>
+
         <div className="form-actions">
-          <button 
-            onClick={handleConversion} 
+          <button
+            onClick={handleConversion}
             className="btn btn-primary"
-            disabled={!selectedFile || loading}
+            disabled={(!selectedFile && !uploadFile) || loading}
           >
             {loading ? (
               <>

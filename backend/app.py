@@ -268,33 +268,67 @@ def upload_config():
 
 @app.route('/api/txttopdf', methods=['POST'])
 def txt_to_pdf_endpoint():
-    data = request.get_json()
-    filename = data.get("filename")
-    if not filename:
-        return jsonify({"error": "Missing filename parameter"}), 400
-    txt_path = os.path.join(OUTPUT_FOLDER, filename)
-    if not os.path.exists(txt_path):
-        return jsonify({"error": "File not found"}), 404
-    try:
-        pdf_path = convert_txt_to_pdf(txt_path)
+    # Allow either an uploaded file or a filename from the outputs folder
+    if 'file' in request.files:
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file provided"}), 400
+        if not file.filename.lower().endswith(('.txt', '.md')):
+            return jsonify({"error": "Invalid file type"}), 400
+        filename = secure_filename(file.filename)
+        temp_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(temp_path)
+        try:
+            pdf_path = convert_txt_to_pdf(temp_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         return jsonify({"message": "Text to PDF conversion completed", "pdf_file": os.path.basename(pdf_path)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    else:
+        data = request.get_json() or {}
+        filename = data.get("filename")
+        if not filename:
+            return jsonify({"error": "Missing filename parameter"}), 400
+        txt_path = os.path.join(OUTPUT_FOLDER, filename)
+        if not os.path.exists(txt_path):
+            return jsonify({"error": "File not found"}), 404
+        try:
+            pdf_path = convert_txt_to_pdf(txt_path)
+            return jsonify({"message": "Text to PDF conversion completed", "pdf_file": os.path.basename(pdf_path)})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 @app.route('/api/mdtoepub', methods=['POST'])
 def md_to_epub_endpoint():
-    data = request.get_json()
-    filename = data.get("filename")
-    if not filename:
-        return jsonify({"error": "Missing filename parameter"}), 400
-    md_path = os.path.join(OUTPUT_FOLDER, filename)
-    if not os.path.exists(md_path):
-        return jsonify({"error": "File not found"}), 404
-    try:
-        epub_path = convert_md_to_epub(md_path)
+    # Support manual upload of Markdown files
+    if 'file' in request.files:
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file provided"}), 400
+        if not file.filename.lower().endswith('.md'):
+            return jsonify({"error": "Invalid file type"}), 400
+        filename = secure_filename(file.filename)
+        temp_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(temp_path)
+        try:
+            epub_path = convert_md_to_epub(temp_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         return jsonify({"message": "Markdown to EPUB conversion completed", "epub_file": os.path.basename(epub_path)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    else:
+        data = request.get_json() or {}
+        filename = data.get("filename")
+        if not filename:
+            return jsonify({"error": "Missing filename parameter"}), 400
+        md_path = os.path.join(OUTPUT_FOLDER, filename)
+        if not os.path.exists(md_path):
+            return jsonify({"error": "File not found"}), 404
+        try:
+            epub_path = convert_md_to_epub(md_path)
+            return jsonify({"message": "Markdown to EPUB conversion completed", "epub_file": os.path.basename(epub_path)})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')

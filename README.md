@@ -21,8 +21,8 @@ A simple web app combining OCR, AI-assisted correction, translation and optional
   - **AI (Full AI OCR)**: Gemini AI processes each page and outputs Markdown.
 - **Compression**: optional PDF or image compression after processing.
 - All modes show real-time emoji progress.
-- **TXT to PDF**: convert text files (.txt or .md) into clean PDFs.
-- **Markdown to EPUB**: turn Markdown files into EPUB ebooks.
+- **TXT to PDF**: convert text files (.txt or .md) into clean PDFs. Files can be uploaded manually or selected from previous results.
+- **Markdown to EPUB**: turn Markdown files into EPUB ebooks. Supports direct upload or choosing an existing file.
 - **Translation**: translate PDF or text documents page by page.
 - **Configuration**: manage prompts, models and languages.
 
@@ -65,8 +65,8 @@ A simple web app combining OCR, AI-assisted correction, translation and optional
 1. Go to the **OCR** tab.
 2. Upload a file and select **AI**.
 3. Choose a prompt and process the file.
-4. Convert the resulting Markdown text (.txt or .md) to PDF using the **TXT to PDF** tab if needed.
-5. Create an EPUB version using the **MD to EPUB** tab when desired.
+4. Convert the resulting Markdown text (.txt or .md) to PDF using the **TXT to PDF** tab if needed. You can upload a text or Markdown file directly or choose one from the list.
+5. Create an EPUB version using the **MD to EPUB** tab when desired. This section also allows manual Markdown uploads.
 
 ### Optional Compression
 1. Enable compression in the **OCR** tab.
