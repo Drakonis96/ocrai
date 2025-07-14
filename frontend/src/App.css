@@ -1200,6 +1200,7 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .file-info {
@@ -1216,6 +1217,7 @@ body {
 
 .file-details {
   flex: 1;
+  min-width: 0;
 }
 
 .file-name {
@@ -1223,6 +1225,9 @@ body {
   color: var(--gray-900);
   margin: 0 0 0.25rem 0;
   font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-description {
