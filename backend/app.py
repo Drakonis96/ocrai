@@ -99,7 +99,15 @@ def upload_file():
     file.save(file_path)
 
     job_id = str(uuid.uuid4())
-    active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None, "current_page": 0, "total_pages": 0}
+    active_jobs[job_id] = {
+        "progress": 0,
+        "status": "📤 File uploaded",
+        "cancelled": False,
+        "result": None,
+        "current_page": 0,
+        "total_pages": 0,
+        "filename": filename,
+    }
 
     thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression_settings, output_format))
     thread.start()
@@ -118,6 +126,20 @@ def get_progress(job_id):
         })
     else:
         return jsonify({"error": "Job not found"}), 404
+
+@app.route('/api/jobs', methods=['GET'])
+def list_jobs():
+    jobs = []
+    for jid, info in active_jobs.items():
+        jobs.append({
+            "job_id": jid,
+            "filename": info.get("filename", ""),
+            "progress": info.get("progress", 0),
+            "status": info.get("status", ""),
+            "current_page": info.get("current_page", 0),
+            "total_pages": info.get("total_pages", 0)
+        })
+    return jsonify({"jobs": jobs})
 
 @app.route('/api/stop/<job_id>', methods=['POST'])
 def stop_job(job_id):
