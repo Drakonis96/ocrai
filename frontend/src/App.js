@@ -6,6 +6,7 @@ import Configurations from './components/Configurations';
 import TxtToPdf from './components/TxtToPdf';
 import MdToEpub from './components/MdToEpub';
 import Notifications from './components/Notifications';
+import ProcessingQueue from './components/ProcessingQueue';
 
 function App() {
   const [activeTab, setActiveTab] = useState('ocrAI');
@@ -81,6 +82,7 @@ function App() {
             </button>
           ))}
         </nav>
+        <ProcessingQueue />
       </aside>
 
       {/* Main Content */}

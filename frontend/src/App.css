@@ -689,6 +689,35 @@ body {
   transform: translateY(-1px);
 }
 
+/* Processing Queue */
+.queue-container {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--gray-200);
+}
+
+.queue-title {
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--gray-700);
+  font-size: 0.875rem;
+}
+
+.queue-item {
+  margin-bottom: 1rem;
+}
+
+.queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.queue-filename {
+  font-size: 0.875rem;
+  color: var(--gray-800);
+  word-break: break-all;
+}
+
 /* Notifications */
 .notifications-container {
   position: fixed;
