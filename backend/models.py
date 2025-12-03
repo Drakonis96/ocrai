@@ -65,7 +65,11 @@ def delete_prompt(key):
 
 # Añadimos soporte para Gemini en available_models
 available_models = {
-    "Gemini": ["gemini-2.0-flash"]
+    "Gemini": [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+    ]
 }
 
 def get_models(api_name):
