@@ -10,6 +10,7 @@ import uuid
 import subprocess
 import base64
 import re
+import io
 import fitz  # PyMuPDF
 import img2pdf
 from models import get_prompt
@@ -28,6 +29,160 @@ OUTPUT_FOLDER = "outputs"
 def encode_image(file_path):
     with open(file_path, "rb") as f:
         return base64.b64encode(f.read()).decode("utf-8")
+
+
+def image_to_base64(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def _group_tesseract_lines(data_dict):
+    """Group pytesseract image_to_data output by line with bounding boxes."""
+    lines = {}
+    n = len(data_dict.get("text", []))
+    for i in range(n):
+        text = data_dict["text"][i].strip()
+        if not text:
+            continue
+        block = data_dict.get("block_num", [0])[i]
+        par = data_dict.get("par_num", [0])[i]
+        line = data_dict.get("line_num", [0])[i]
+        key = (block, par, line)
+        left, top, width, height = (
+            data_dict.get("left", [0])[i],
+            data_dict.get("top", [0])[i],
+            data_dict.get("width", [0])[i],
+            data_dict.get("height", [0])[i],
+        )
+        if key not in lines:
+            lines[key] = {
+                "text": text,
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+            }
+        else:
+            lines[key]["text"] += f" {text}"
+            # Expand bounding box
+            current = lines[key]
+            new_left = min(current["left"], left)
+            new_top = min(current["top"], top)
+            new_right = max(current["left"] + current["width"], left + width)
+            new_bottom = max(current["top"] + current["height"], top + height)
+            current["left"] = new_left
+            current["top"] = new_top
+            current["width"] = new_right - new_left
+            current["height"] = new_bottom - new_top
+    # Return list sorted by position
+    return [v for _, v in sorted(lines.items(), key=lambda item: (item[1]["top"], item[1]["left"]))]
+
+
+def classify_line_area(text, bbox, page_height, references_started=False):
+    """Classify a text line into a document area based on heuristics."""
+    cleaned = text.strip()
+    if not cleaned:
+        return "main_text", references_started
+
+    top = bbox.get("top", 0)
+    height = bbox.get("height", 0)
+    bottom = top + height
+    header_threshold = page_height * 0.15
+    footer_threshold = page_height * 0.85
+    lower_quarter = page_height * 0.75
+
+    lower_clean = cleaned.lower()
+    if re.match(r"^(page\s*)?\d+(\s*/\s*\d+)?$", lower_clean) and (top < header_threshold or bottom > footer_threshold):
+        return "page_number", references_started
+
+    if references_started or lower_clean in {"references", "bibliography"}:
+        return "references", True
+
+    if top < header_threshold:
+        return "header", references_started
+
+    if bottom > footer_threshold:
+        if re.search(r"figure|fig\.|table", lower_clean):
+            return "caption", references_started
+        return "footer", references_started
+
+    # Titles: short lines with strong casing cues
+    words = cleaned.split()
+    uppercase_ratio = sum(1 for w in words if w.isupper()) / max(len(words), 1)
+    title_keywords = {"abstract", "introduction", "summary", "conclusion"}
+    if (
+        len(words) <= 12
+        and (uppercase_ratio > 0.6 or cleaned.istitle())
+    ) or lower_clean.rstrip(":") in title_keywords:
+        return "titles", references_started
+
+    # Captions: short, near bottom quarter or with figure/table hints
+    if (
+        len(cleaned) <= 140
+        and (top > lower_quarter or re.search(r"figure|fig\.|table", lower_clean))
+    ):
+        return "caption", references_started
+
+    return "main_text", references_started
+
+
+def extract_layout_from_image(image: Image.Image, page_number: int = 1):
+    """Extract layout areas from a PIL image."""
+    data = pytesseract.image_to_data(image, lang="eng", output_type=pytesseract.Output.DICT)
+    lines = _group_tesseract_lines(data)
+    page_height = image.height
+    areas = []
+    references_started = False
+
+    for idx, line in enumerate(lines):
+        area_type, references_started = classify_line_area(
+            line["text"], line, page_height, references_started
+        )
+        areas.append(
+            {
+                "id": f"p{page_number}_l{idx}",
+                "page": page_number,
+                "type": area_type,
+                "text": line["text"],
+                "bbox": {
+                    "left": line["left"],
+                    "top": line["top"],
+                    "width": line["width"],
+                    "height": line["height"],
+                },
+            }
+        )
+
+    return areas
+
+
+def build_layout_document(file_path):
+    """Generate a lightweight layout document (first page) with OCR areas."""
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    if file_path.lower().endswith(".pdf"):
+        pages = convert_from_path(file_path, first_page=1, last_page=1)
+        image = pages[0]
+    else:
+        image = Image.open(file_path)
+
+    page_number = 1
+    areas = extract_layout_from_image(image, page_number=page_number)
+    layout = {
+        "name": base_name,
+        "original_file": os.path.basename(file_path),
+        "pages": [
+            {
+                "page": page_number,
+                "width": image.width,
+                "height": image.height,
+                "image_base64": image_to_base64(image),
+                "areas": areas,
+            }
+        ],
+    }
+    return layout
 
 def run_tesseract(file_path, prompt_key=""):
     """
