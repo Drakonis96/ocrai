@@ -7,7 +7,13 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from models import get_models, add_model, get_languages, update_prompt, get_prompt, add_language, delete_prompt, custom_prompts, default_prompts
-from utils import process_file, translate_file_by_pages, convert_txt_to_pdf, convert_md_to_epub
+from utils import (
+    process_file,
+    translate_file_by_pages,
+    convert_txt_to_pdf,
+    convert_md_to_epub,
+    build_layout_document,
+)
 import time
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -21,6 +27,13 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Global dictionary for background jobs
 active_jobs = {}  # job_id: {"progress": int, "status": str, "cancelled": bool, "result": any, "current_page": int, "total_pages": int}
+
+
+def _layout_file_path(name: str):
+    filename = name
+    if not filename.endswith("_layout.json"):
+        filename = f"{name}_layout.json"
+    return os.path.join(OUTPUT_FOLDER, filename)
 
 def update_progress(job_id, progress, status, current_page=None, total_pages=None):
     if job_id not in active_jobs:
@@ -105,6 +118,38 @@ def upload_file():
     thread.start()
 
     return jsonify({"message": "File uploaded, processing started", "job_id": job_id})
+
+
+@app.route('/api/layout-ocr', methods=['POST'])
+def layout_ocr():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file found"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Empty filename"}), 400
+
+    filename = secure_filename(file.filename)
+    base, ext = os.path.splitext(filename)
+    if os.path.exists(os.path.join(UPLOAD_FOLDER, filename)):
+        filename = f"{base}_{uuid.uuid4().hex}{ext}"
+        base = os.path.splitext(filename)[0]
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    file.save(file_path)
+
+    try:
+        layout = build_layout_document(file_path)
+        layout_filename = _layout_file_path(base)
+        with open(layout_filename, 'w', encoding='utf-8') as f:
+            json.dump(layout, f, ensure_ascii=False, indent=2)
+
+        return jsonify({
+            "message": "Layout OCR completed",
+            "layout": layout,
+            "layout_file": os.path.basename(layout_filename)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/progress/<job_id>', methods=['GET'])
 def get_progress(job_id):
@@ -209,6 +254,52 @@ def list_files():
     # Sort by modification time (newest first)
     files.sort(key=lambda x: x['modified'], reverse=True)
     return jsonify({"files": files})
+
+
+@app.route('/api/layouts', methods=['GET'])
+def list_layouts():
+    layouts = []
+    for filename in os.listdir(OUTPUT_FOLDER):
+        if filename.endswith('_layout.json'):
+            path = os.path.join(OUTPUT_FOLDER, filename)
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                layouts.append({
+                    "name": data.get('name', filename.replace('_layout.json', '')),
+                    "file": filename,
+                    "original_file": data.get('original_file'),
+                    "pages": len(data.get('pages', [])),
+                    "modified": os.path.getmtime(path)
+                })
+            except Exception:
+                continue
+    layouts.sort(key=lambda x: x['modified'], reverse=True)
+    return jsonify({"layouts": layouts})
+
+
+@app.route('/api/layouts/<name>', methods=['GET'])
+def get_layout(name):
+    path = _layout_file_path(name)
+    if not os.path.exists(path):
+        return jsonify({"error": "Layout not found"}), 404
+    with open(path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return jsonify({"layout": data})
+
+
+@app.route('/api/layouts/<name>', methods=['POST'])
+def save_layout(name):
+    path = _layout_file_path(name)
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing layout payload"}), 400
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return jsonify({"message": "Layout saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/files/<filename>', methods=['GET'])
 def download_file(filename):

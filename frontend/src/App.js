@@ -6,6 +6,7 @@ import Configurations from './components/Configurations';
 import TxtToPdf from './components/TxtToPdf';
 import MdToEpub from './components/MdToEpub';
 import Notifications from './components/Notifications';
+import LayoutOcr from './components/LayoutOcr';
 
 function App() {
   const [activeTab, setActiveTab] = useState('ocrAI');
@@ -33,6 +34,7 @@ function App() {
     { id: 'ocrAI', label: 'OCR AI Processing', icon: '🤖', description: 'Upload and process documents with AI' },
     { id: 'files', label: 'Processed Files', icon: '📁', description: 'View and manage processed files' },
     { id: 'configurations', label: 'Settings', icon: '⚙️', description: 'Configure application settings' },
+    { id: 'layout', label: 'Layout OCR', icon: '🗺️', description: 'Detect and edit document areas' },
     { id: 'txttopdf', label: 'TXT to PDF', icon: '📝', description: 'Convert text files to PDF' },
     { id: 'mdtoepub', label: 'MD to EPUB', icon: '📚', description: 'Convert Markdown files to EPUB' }
   ];
@@ -99,6 +101,7 @@ function App() {
             {activeTab === 'ocrAI' && <FileUpload onJobCompleted={handleJobCompleted} />}
             {activeTab === 'files' && <FileList />}
             {activeTab === 'configurations' && <Configurations />}
+            {activeTab === 'layout' && <LayoutOcr />}
             {activeTab === 'txttopdf' && <TxtToPdf />}
             {activeTab === 'mdtoepub' && <MdToEpub />}
           </div>
