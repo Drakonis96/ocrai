@@ -1,82 +1,59 @@
-<div align="center">
-  <img src="/backend/static/logo.png" alt="ocrAI Logo" width="250">
-</div>
 
-# ocrAI 🤖
+-1
 
-A simple web app combining OCR, AI-assisted correction, translation and optional compression with an intuitive interface.
+# DocuClean AI
 
-## Contents
-- [Features](#features)
-- [Installation](#installation)
-- [How to Use](#how-to-use)
-- [Screenshots](#screenshots)
-- [License](#license)
+DocuClean AI is a document cleanup and note-taking assistant. Upload PDFs or images, let Gemini OCR extract page content with layout-aware blocks, and review the cleaned text inside a simple editor. Documents, folders, and exportable notes are stored locally on the server so you can organize and download everything in one place.
 
-## Features
-- **File Management**: upload PDFs or images, unique file names and one-click cleanup.
-- **OCR Processing Modes**
-  - **OCR (Tesseract Only)**: extract text and embed it into the PDF.
-  - **OCR + AI**: Tesseract followed by Gemini AI correction embedded into the PDF.
-  - **AI (Full AI OCR)**: Gemini AI processes each page and outputs Markdown.
-- **Compression**: optional PDF or image compression after processing.
-- All modes show real-time emoji progress.
-- **TXT to PDF**: convert text files (.txt or .md) into clean PDFs.
-- **Markdown to EPUB**: turn Markdown files into EPUB ebooks.
-- **Translation**: translate PDF or text documents page by page.
-- **Configuration**: manage prompts, models and languages.
+## How it works
+- **Upload & ingestion**: From the dashboard you can create folders, upload PDFs or images, and pick the Gemini model used for OCR. PDFs are converted to page images in the browser before being sent to the backend.
+- **Background processing**: The backend queues each document for processing, saves page images under `data/<docId>`, and calls the configured Gemini model (`gemini-2.5-flash` by default) to produce labeled text blocks for every page.
+- **Editing & export**: Open a processed document to view or tweak the reconstructed text (including headers, captions, and footnotes). You can export all ready documents as a ZIP of `.txt` files or download individual markdown files generated per page under `data/<docId>`.
+- **Storage model**: All metadata and generated files live under the `data/` directory (one subfolder per document) alongside a `metadata.json` file that tracks status, pages, and saved edits.
 
-## Installation
+## Requirements
+- Node.js 20+
+- A Gemini API key exposed as `GEMINI_API_KEY` in `.env.local` or your environment
+- (Optional) Docker and Docker Compose for containerized deployments
 
-### Windows or macOS (Docker Desktop)
-1. Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop/).
-   Launch Docker Desktop once the installation completes.
-2. Download this repository:
-   - **Option A:** click the green **Code** button on GitHub and choose **Download ZIP**. Unzip the file anywhere you like.
-   - **Option B:** if you have Git installed, run:
-     ```bash
-     git clone https://github.com/Drakonis96/ocrai.git
-     ```
-3. Open the `ocrai` folder and edit the `docker-compose.yml` file with Notepad (Windows) or TextEdit (macOS).
-   Replace `your_gemini_api_key` with your own Gemini API key.
-4. Open a terminal inside this folder:
-   - **Windows:** right-click the folder and select **Open PowerShell window here**.
-   - **macOS:** open **Terminal**, then `cd` into the folder.
-5. Run the application:
-   ```bash
-   docker compose up --build
+## Local development with Vite
+1. Install dependencies: `npm install`.
+2. Create `.env.local` with your API key:
    ```
-   The first run may take a few minutes while Docker downloads everything.
-6. When the terminal shows that the app is running, open your web browser at <http://localhost:5015>.
-7. To stop the app later, press `Ctrl+C` in the terminal and run `docker compose down`.
+   GEMINI_API_KEY=your-key-here
+   ```
+3. Start the Vite dev server and API in one step:
+   ```
+   npm run dev
+   ```
+   - Vite serves the React UI.
+   - The Express server (`server.js`) proxies Gemini requests and persists uploads under `data/`.
+4. Open the app at the URL printed by Vite (typically `http://localhost:5173`).
 
-## How to Use
-### OCR Mode
-1. Go to the **OCR** tab.
-2. Upload a PDF or image.
-3. Select **OCR** and click **Upload and process**.
+## Production build
+1. Build the frontend: `npm run build`.
+2. Start the bundled server that serves the built assets and API on port `5037`:
+   ```
+   npm start
+   ```
+3. Persisted files remain in `data/`. Make sure the `data/` directory is writable in your environment.
 
-### OCR + AI Mode
-1. Go to the **OCR** tab.
-2. Upload a file and choose **OCR + AI**.
-3. Pick an AI prompt and start processing.
+## Docker
+### Build and run
+```bash
+docker build -t docuclean-ai .
+docker run -p 5037:5037 --env-file .env.local -v $(pwd)/data:/app/data docuclean-ai
+```
 
-### AI Mode
-1. Go to the **OCR** tab.
-2. Upload a file and select **AI**.
-3. Choose a prompt and process the file.
-4. Convert the resulting Markdown text (.txt or .md) to PDF using the **TXT to PDF** tab if needed.
-5. Create an EPUB version using the **MD to EPUB** tab when desired.
+### Docker Compose
+```bash
+docker compose up --build
+```
+- Exposes the app on port `5037`.
+- Binds `./data` on the host for persistent storage.
+- Mounts `.env.local` so `GEMINI_API_KEY` is available inside the container.
+- Restarts automatically unless stopped.
 
-### Optional Compression
-1. Enable compression in the **OCR** tab.
-2. Adjust DPI, quality and format as desired.
-3. Process the file in any mode; the output will be compressed if enabled.
-
-## Screenshots
-![UI](screenshots/Screenshot%201.png)
-![Processing](screenshots/Screenshot%202.png)
-![Results](screenshots/Screenshot%203.png)
-
-## License
-This project is licensed under the **GNU GENERAL PUBLIC LICENSE Version 3**. See the [LICENSE](LICENSE) file for details.
+## Troubleshooting
+- If uploads never finish, confirm `GEMINI_API_KEY` is set and the key has access to the selected Gemini models.
+- Ensure the `data/` directory exists and is writable so the server can store images, markdown, and metadata.
