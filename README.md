@@ -1,9 +1,6 @@
+# ocrAI
 
--1
-
-# DocuClean AI
-
-DocuClean AI is a document cleanup and note-taking assistant. Upload PDFs or images, let Gemini OCR extract page content with layout-aware blocks, and review the cleaned text inside a simple editor. Documents, folders, and exportable notes are stored locally on the server so you can organize and download everything in one place.
+ocrAI AI is a document cleanup and note-taking assistant. Upload PDFs or images, let Gemini OCR extract page content with layout-aware blocks, and review the cleaned text inside a simple editor. Documents, folders, and exportable notes are stored locally on the server so you can organize and download everything in one place.
 
 ## How it works
 - **Upload & ingestion**: From the dashboard you can create folders, upload PDFs or images, and pick the Gemini model used for OCR. PDFs are converted to page images in the browser before being sent to the backend.
