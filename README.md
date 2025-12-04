@@ -22,8 +22,8 @@ ocrAI is a document cleanup and note-taking assistant. Upload PDFs or images, le
 2. Create `.env.local` with your API key and login credentials:
    ```env
    GEMINI_API_KEY=your-gemini-api-key-here
-   APP_USERNAME=your-username
-   APP_PASSWORD=your-password
+   ADMIN_USERNAME=your-username
+   ADMIN_PASSWORD=your-password
    ```
 3. Start the Vite dev server and API in one step:
 ## Configuration
@@ -34,8 +34,8 @@ Create a `.env.local` file in the root directory with the following variables:
 GEMINI_API_KEY=your-gemini-api-key-here
 
 # Authentication credentials (required)
-APP_USERNAME=your-username
-APP_PASSWORD=your-password
+ADMIN_USERNAME=your-username
+ADMIN_PASSWORD=your-password
 ```
 
 **Important**: Keep your `.env.local` file secure and never commit it to version control.
@@ -73,13 +73,13 @@ docker compose up --build
 ```
 - Exposes the app on port `5037`.
 - Binds `./data` on the host for persistent storage.
-- Mounts `.env.local` so `GEMINI_API_KEY`, `APP_USERNAME`, and `APP_PASSWORD` are available inside the container.
+- Mounts `.env.local` so `GEMINI_API_KEY`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD` are available inside the container.
 - Restarts automatically unless stopped.
 - Binds `./data` on the host for persistent storage.
 - Mounts `.env.local` so `GEMINI_API_KEY` is available inside the container.
 - Restarts automatically unless stopped.
 ## Troubleshooting
-- **Cannot log in**: Verify that `APP_USERNAME` and `APP_PASSWORD` are correctly set in `.env.local`.
+- **Cannot log in**: Verify that `ADMIN_USERNAME` and `ADMIN_PASSWORD` are correctly set in `.env.local`.
 - **Uploads never finish**: Confirm `GEMINI_API_KEY` is set and the key has access to the selected Gemini models.
 - **Storage issues**: Ensure the `data/` directory exists and is writable so the server can store images, markdown, and metadata.
 - **Environment variables not loading**: Make sure `.env.local` is in the root directory and properly formatted.ls.
