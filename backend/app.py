@@ -2,6 +2,7 @@
 import os
 import uuid
 import threading
+from queue import Queue
 import json
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -26,7 +27,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # Global dictionary for background jobs
-active_jobs = {}  # job_id: {"progress": int, "status": str, "cancelled": bool, "result": any, "current_page": int, "total_pages": int}
+active_jobs = {}  # job_id: {"progress": int, "status": str, "cancelled": bool, "result": any, "current_page": int, "total_pages": int, "filename": str}
+# Queue for pending jobs
+job_queue = Queue()
 
 
 def _layout_file_path(name: str):
@@ -78,6 +81,29 @@ def run_translation(job_id, file_path, api, model, target_language, prompt_key):
     except Exception as e:
         update_progress(job_id, active_jobs[job_id]["progress"], f"❌ Error: {str(e)}")
 
+def queue_worker():
+    while True:
+        job = job_queue.get()
+        if job is None:
+            break
+        job_id = job["job_id"]
+        update_progress(job_id, 0, "🚀 Processing started")
+        run_processing(
+            job_id,
+            job["file_path"],
+            job["api"],
+            job["model"],
+            job["mode"],
+            job["prompt_key"],
+            job.get("compression_settings"),
+            job.get("output_format", "md")
+        )
+        job_queue.task_done()
+
+# Start the queue worker thread
+worker_thread = threading.Thread(target=queue_worker, daemon=True)
+worker_thread.start()
+
 @app.route('/api/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -112,12 +138,28 @@ def upload_file():
     file.save(file_path)
 
     job_id = str(uuid.uuid4())
-    active_jobs[job_id] = {"progress": 0, "status": "📤 File uploaded", "cancelled": False, "result": None, "current_page": 0, "total_pages": 0}
+    active_jobs[job_id] = {
+        "progress": 0,
+        "status": "⏳ Queued",
+        "cancelled": False,
+        "result": None,
+        "current_page": 0,
+        "total_pages": 0,
+        "filename": filename
+    }
 
-    thread = threading.Thread(target=run_processing, args=(job_id, file_path, api, model, mode, prompt_key, compression_settings, output_format))
-    thread.start()
+    job_queue.put({
+        "job_id": job_id,
+        "file_path": file_path,
+        "api": api,
+        "model": model,
+        "mode": mode,
+        "prompt_key": prompt_key,
+        "compression_settings": compression_settings,
+        "output_format": output_format
+    })
 
-    return jsonify({"message": "File uploaded, processing started", "job_id": job_id})
+    return jsonify({"message": "File uploaded, job queued", "job_id": job_id})
 
 
 @app.route('/api/layout-ocr', methods=['POST'])
@@ -163,6 +205,10 @@ def get_progress(job_id):
         })
     else:
         return jsonify({"error": "Job not found"}), 404
+
+@app.route('/api/jobs', methods=['GET'])
+def list_jobs():
+    return jsonify({"jobs": active_jobs})
 
 @app.route('/api/stop/<job_id>', methods=['POST'])
 def stop_job(job_id):

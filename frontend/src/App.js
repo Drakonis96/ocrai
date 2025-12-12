@@ -5,6 +5,7 @@ import FileList from './components/FileList';
 import Configurations from './components/Configurations';
 import TxtToPdf from './components/TxtToPdf';
 import MdToEpub from './components/MdToEpub';
+import JobQueue from './components/JobQueue';
 import Notifications from './components/Notifications';
 import LayoutOcr from './components/LayoutOcr';
 
@@ -36,7 +37,8 @@ function App() {
     { id: 'configurations', label: 'Settings', icon: '⚙️', description: 'Configure application settings' },
     { id: 'layout', label: 'Layout OCR', icon: '🗺️', description: 'Detect and edit document areas' },
     { id: 'txttopdf', label: 'TXT to PDF', icon: '📝', description: 'Convert text files to PDF' },
-    { id: 'mdtoepub', label: 'MD to EPUB', icon: '📚', description: 'Convert Markdown files to EPUB' }
+    { id: 'mdtoepub', label: 'MD to EPUB', icon: '📚', description: 'Convert Markdown files to EPUB' },
+    { id: 'queue', label: 'Task Queue', icon: '⏳', description: 'View processing tasks' }
   ];
 
   return (
@@ -104,6 +106,7 @@ function App() {
             {activeTab === 'layout' && <LayoutOcr />}
             {activeTab === 'txttopdf' && <TxtToPdf />}
             {activeTab === 'mdtoepub' && <MdToEpub />}
+            {activeTab === 'queue' && <JobQueue />}
           </div>
         </div>
       </main>
