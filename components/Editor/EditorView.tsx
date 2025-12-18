@@ -33,13 +33,19 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
   
   // Toggle for full document vs current page view
   const [showFullDocument, setShowFullDocument] = useState(true);
+  
+  // Toggle for showing/hiding the editor panel
+  const [showEditor, setShowEditor] = useState(true);
+  
+  // Editor panel width percentage (30-70%)
+  const [editorWidth, setEditorWidth] = useState(50);
 
   // Get displayed text based on view mode
-  const getDisplayedText = () => {
-    if (showFullDocument) {
-      return reconstructCleanText(doc.pages, selectedLabels);
+  const getDisplayedText = (fullDoc: boolean, pageIndex: number, labels: BlockLabel[]) => {
+    if (fullDoc) {
+      return reconstructCleanText(doc.pages, labels);
     } else {
-      return reconstructCleanText([doc.pages[activePage]], selectedLabels);
+      return reconstructCleanText([doc.pages[pageIndex]], labels);
     }
   };
 
@@ -50,7 +56,7 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
     if (doc.savedText) {
       setCleanText(doc.savedText);
     } else {
-      setCleanText(getDisplayedText());
+      setCleanText(getDisplayedText(showFullDocument, activePage, selectedLabels));
     }
     setIsSaved(true); // Reset save state when loading a new document
     // We only want to run this init logic once when doc changes, 
@@ -58,9 +64,13 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.id]); // Only re-run when document ID changes
 
-  // Note: Removed the useEffect that was resetting text on view/page change
-  // This was causing manual edits to be lost. Users can now edit the full
-  // document text and save it without losing changes when navigating.
+  // Update text when view mode or active page changes
+  useEffect(() => {
+    const newText = getDisplayedText(showFullDocument, activePage, selectedLabels);
+    setCleanText(newText);
+    setIsSaved(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showFullDocument, activePage]);
 
   const handleTextChange = (newText: string) => {
     setCleanText(newText);
@@ -75,8 +85,7 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
       
       // Trigger reconstruction immediately using the new labels
       // Note: This will overwrite manual edits if they haven't been saved/exported.
-      const pagesToUse = showFullDocument ? doc.pages : [doc.pages[activePage]];
-      const newText = reconstructCleanText(pagesToUse, newLabels);
+      const newText = getDisplayedText(showFullDocument, activePage, newLabels);
       setCleanText(newText);
       setIsSaved(false); // Mark as unsaved
       
@@ -161,9 +170,9 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
   ];
 
   const filterControls = (
-    <div className="flex items-center space-x-3 overflow-x-auto no-scrollbar py-1">
+    <div className="flex items-center gap-4 overflow-x-auto no-scrollbar py-1 flex-wrap">
       {/* View Mode Toggle */}
-      <div className="flex items-center space-x-1 pr-2 border-r border-slate-200 dark:border-slate-700">
+      <div className="flex items-center space-x-1">
         <button
           onClick={() => setShowFullDocument(true)}
           className={`px-2 py-1 text-xs rounded-l-md transition-colors ${
@@ -188,20 +197,24 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
         </button>
       </div>
       
-      <span className="text-xs text-slate-400 font-medium whitespace-nowrap pl-2 border-l border-slate-200 dark:border-slate-700">Include:</span>
-      {availableLabels.map(label => (
-        <label key={label} className="flex items-center space-x-1 cursor-pointer group select-none">
-          <input 
-            type="checkbox" 
-            checked={selectedLabels.includes(label)}
-            onChange={() => toggleLabel(label)}
-            className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 dark:border-slate-600 focus:ring-blue-500 bg-white dark:bg-slate-700"
-          />
-          <span className="text-xs text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 capitalize">
-            {label.toLowerCase().replace('_', ' ')}
-          </span>
-        </label>
-      ))}
+      <div className="h-4 w-px bg-slate-200 dark:bg-slate-700" />
+      
+      <span className="text-xs text-slate-400 font-medium whitespace-nowrap">Include:</span>
+      <div className="flex items-center gap-4">
+        {availableLabels.map(label => (
+          <label key={label} className="flex items-center gap-1.5 cursor-pointer group select-none">
+            <input 
+              type="checkbox" 
+              checked={selectedLabels.includes(label)}
+              onChange={() => toggleLabel(label)}
+              className="w-4 h-4 text-blue-600 rounded border-slate-300 dark:border-slate-600 focus:ring-blue-500 bg-white dark:bg-slate-700"
+            />
+            <span className="text-xs text-slate-600 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 capitalize whitespace-nowrap">
+              {label.toLowerCase().replace('_', ' ')}
+            </span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 
@@ -266,7 +279,10 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Image Viewer */}
-        <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
+        <div 
+          className="flex flex-col border-r border-slate-200 dark:border-slate-700 transition-all duration-300"
+          style={{ width: showEditor ? `${100 - editorWidth}%` : '100%' }}
+        >
           <div className="flex-1 overflow-hidden relative bg-slate-100 dark:bg-slate-900">
             {doc.pages[activePage] && (
               <ImageViewer page={doc.pages[activePage]} />
@@ -340,13 +356,60 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
         </div>
 
         {/* Right: Text Editor */}
-        <div className="w-1/2 h-full">
-          <TextEditor 
-            text={cleanText} 
-            onChange={handleTextChange} 
-            headerControls={filterControls}
-          />
-        </div>
+        {showEditor && (
+          <div 
+            className="h-full flex flex-col transition-all duration-300"
+            style={{ width: `${editorWidth}%` }}
+          >
+            {/* Editor Panel Controls */}
+            <div className="flex items-center justify-between px-3 py-1.5 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 dark:text-slate-400">Panel Size:</span>
+                <input
+                  type="range"
+                  min="30"
+                  max="70"
+                  value={editorWidth}
+                  onChange={(e) => setEditorWidth(Number(e.target.value))}
+                  className="w-20 h-1 bg-slate-300 dark:bg-slate-600 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  title="Adjust editor panel width"
+                />
+                <span className="text-xs text-slate-400 w-8">{editorWidth}%</span>
+              </div>
+              <button
+                onClick={() => setShowEditor(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors"
+                title="Hide Editor Panel"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <TextEditor 
+                text={cleanText} 
+                onChange={handleTextChange} 
+                headerControls={filterControls}
+              />
+            </div>
+          </div>
+        )}
+        
+        {/* Show Editor Button (when editor is hidden) */}
+        {!showEditor && (
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20">
+            <button
+              onClick={() => setShowEditor(true)}
+              className="p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
+              title="Show Editor Panel"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Reprocess Modal */}
