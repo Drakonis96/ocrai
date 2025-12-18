@@ -3,12 +3,13 @@ import { Login } from './components/Login';
 import UploadView from './components/UploadView';
 import Dashboard from './components/Dashboard';
 import EditorView from './components/Editor/EditorView';
-import { HomeIcon, ArchiveIcon, TrashIcon, AlertCircleIcon, LoaderIcon, SunIcon, MoonIcon, LogoutIcon } from './components/Icons';
+import { HomeIcon, ArchiveIcon, TrashIcon, AlertCircleIcon, LoaderIcon, SunIcon, MoonIcon, LogoutIcon, SettingsIcon, CloseIcon, PlusIcon } from './components/Icons';
 import { AppView, DocumentData, ProcessingOptions, FileSystemItem, FolderData, PageData } from './types';
 import { reconstructCleanText } from './utils/reconstruction';
 import { getAllItems, saveItem, deleteItem, nukeDB } from './utils/storage';
 import { processPageWithGemini } from './services/geminiService';
 import { MOCK_ID_PREFIX } from './constants';
+import { getModels, addModel, removeModel, GeminiModel, DEFAULT_MODELS } from './utils/modelStorage';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
@@ -40,6 +41,14 @@ const App: React.FC = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteIncludeFolders, setDeleteIncludeFolders] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+
+  // Model Settings Modal State
+  const [isModelSettingsOpen, setIsModelSettingsOpen] = useState(false);
+  const [models, setModels] = useState<GeminiModel[]>([]);
+  const [newModelId, setNewModelId] = useState('');
+  const [newModelName, setNewModelName] = useState('');
+  const [newModelDesc, setNewModelDesc] = useState('');
+  const [modelError, setModelError] = useState('');
 
   // --- DATA LOADING ---
 
@@ -81,6 +90,7 @@ const App: React.FC = () => {
   // Initial Load
   useEffect(() => {
     loadItems();
+    setModels(getModels());
   }, []);
 
   // Theme Logic
@@ -97,6 +107,37 @@ const App: React.FC = () => {
 
   const toggleTheme = () => {
     setIsDarkMode(!isDarkMode);
+  };
+
+  // --- Model Settings ---
+  const handleAddModel = () => {
+    if (!newModelId.trim()) {
+      setModelError('Model ID is required');
+      return;
+    }
+    try {
+      const updated = addModel({
+        id: newModelId.trim(),
+        name: newModelName.trim() || newModelId.trim(),
+        description: newModelDesc.trim() || 'Custom',
+      });
+      setModels(updated);
+      setNewModelId('');
+      setNewModelName('');
+      setNewModelDesc('');
+      setModelError('');
+    } catch (e: any) {
+      setModelError(e.message);
+    }
+  };
+
+  const handleRemoveModel = (modelId: string) => {
+    try {
+      const updated = removeModel(modelId);
+      setModels(updated);
+    } catch (e: any) {
+      setModelError(e.message);
+    }
   };
 
   // --- Helpers ---
@@ -367,6 +408,18 @@ const App: React.FC = () => {
           
           <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
 
+          {/* Model Settings Button */}
+          <button 
+            onClick={() => setIsModelSettingsOpen(true)}
+            className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-colors flex items-center space-x-2"
+            title="Model Settings"
+          >
+            <SettingsIcon className="w-5 h-5" />
+            <span className="font-medium hidden sm:inline">Models</span>
+          </button>
+
+          <div className="h-6 w-px bg-slate-300 dark:bg-slate-600 mx-1"></div>
+
           <button 
             onClick={handleExportAll}
             className="p-2 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg transition-colors flex items-center space-x-2"
@@ -534,6 +587,108 @@ const App: React.FC = () => {
               >
                 Delete All
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Model Settings Modal */}
+      {isModelSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+                  <SettingsIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Model Settings</h2>
+              </div>
+              <button
+                onClick={() => {
+                  setIsModelSettingsOpen(false);
+                  setModelError('');
+                }}
+                className="p-1 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <CloseIcon className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-4 overflow-y-auto max-h-[60vh]">
+              {/* Add New Model */}
+              <div className="mb-6">
+                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Add New Model</h3>
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={newModelId}
+                    onChange={(e) => setNewModelId(e.target.value)}
+                    placeholder="Model ID (e.g., gemini-2.0-pro)"
+                    className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white dark:bg-slate-900 text-slate-900 dark:text-white transition-colors text-sm"
+                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newModelName}
+                      onChange={(e) => setNewModelName(e.target.value)}
+                      placeholder="Display Name (optional)"
+                      className="flex-1 p-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white dark:bg-slate-900 text-slate-900 dark:text-white transition-colors text-sm"
+                    />
+                    <input
+                      type="text"
+                      value={newModelDesc}
+                      onChange={(e) => setNewModelDesc(e.target.value)}
+                      placeholder="Description"
+                      className="flex-1 p-2 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white dark:bg-slate-900 text-slate-900 dark:text-white transition-colors text-sm"
+                    />
+                  </div>
+                  {modelError && (
+                    <p className="text-red-500 text-xs">{modelError}</p>
+                  )}
+                  <button
+                    onClick={handleAddModel}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+                  >
+                    <PlusIcon className="w-4 h-4" />
+                    Add Model
+                  </button>
+                </div>
+              </div>
+
+              {/* Model List */}
+              <div>
+                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-3">Available Models ({models.length})</h3>
+                <div className="space-y-2">
+                  {models.map(model => {
+                    const isDefault = DEFAULT_MODELS.some(dm => dm.id === model.id);
+                    return (
+                      <div
+                        key={model.id}
+                        className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-700/50 rounded-lg"
+                      >
+                        <div>
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">
+                            {model.name}
+                            {model.isCustom && <span className="ml-2 text-xs text-blue-500">★ Custom</span>}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {model.id} · {model.description}
+                          </p>
+                        </div>
+                        {!isDefault && (
+                          <button
+                            onClick={() => handleRemoveModel(model.id)}
+                            className="p-1.5 text-red-500 hover:text-red-700 dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            title="Remove model"
+                          >
+                            <TrashIcon className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>
