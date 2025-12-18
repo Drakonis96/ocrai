@@ -67,7 +67,7 @@ export enum AppView {
 }
 
 export interface ProcessingOptions {
-  model: 'gemini-2.5-flash' | 'gemini-2.5-flash-lite';
+  model: string;
   processingMode: 'ocr' | 'translation' | 'manual';
   targetLanguage?: string;
   customPrompt?: string;
