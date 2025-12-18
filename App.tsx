@@ -24,6 +24,7 @@ const App: React.FC = () => {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   
   // Theme State
@@ -44,10 +45,13 @@ const App: React.FC = () => {
 
   const loadItems = async () => {
     try {
+      setIsLoadingItems(true);
       const data = await getAllItems();
       setItems(data);
     } catch (e) {
       console.error("Failed to load items from DB", e);
+    } finally {
+      setIsLoadingItems(false);
     }
   };
 
@@ -410,29 +414,39 @@ const App: React.FC = () => {
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-hidden relative flex flex-col">
-        {currentView === AppView.UPLOAD && (
-          <UploadView onFileSelect={handleFileSelect} />
-        )}
-        
-        {currentView === AppView.DASHBOARD && (
-          <Dashboard 
-            items={items}
-            currentFolderId={currentFolderId}
-            onOpenDocument={handleOpenDocument}
-            onNewUpload={() => setCurrentView(AppView.UPLOAD)}
-            onCreateFolder={handleCreateFolder}
-            onNavigateFolder={setCurrentFolderId}
-            onDeleteItem={handleRequestDelete}
-            onMoveItem={handleMoveItem}
-          />
-        )}
+        {isLoadingItems ? (
+          <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900">
+            <LoaderIcon className="w-16 h-16 text-blue-600 dark:text-blue-400 animate-spin mb-4" />
+            <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-2">Loading Documents...</h2>
+            <p className="text-slate-500 dark:text-slate-400">Please wait while we load your data</p>
+          </div>
+        ) : (
+          <>
+            {currentView === AppView.UPLOAD && (
+              <UploadView onFileSelect={handleFileSelect} />
+            )}
+            
+            {currentView === AppView.DASHBOARD && (
+              <Dashboard 
+                items={items}
+                currentFolderId={currentFolderId}
+                onOpenDocument={handleOpenDocument}
+                onNewUpload={() => setCurrentView(AppView.UPLOAD)}
+                onCreateFolder={handleCreateFolder}
+                onNavigateFolder={setCurrentFolderId}
+                onDeleteItem={handleRequestDelete}
+                onMoveItem={handleMoveItem}
+              />
+            )}
 
-        {currentView === AppView.EDITOR && activeDoc && (
-          <EditorView 
-            doc={activeDoc} 
-            onBack={() => setCurrentView(AppView.DASHBOARD)}
-            onSave={handleSaveDocument}
-          />
+            {currentView === AppView.EDITOR && activeDoc && (
+              <EditorView 
+                doc={activeDoc} 
+                onBack={() => setCurrentView(AppView.DASHBOARD)}
+                onSave={handleSaveDocument}
+              />
+            )}
+          </>
         )}
       </main>
 

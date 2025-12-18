@@ -643,6 +643,14 @@ app.post('/api/documents', async (req, res) => {
       }
     }
 
+    // Save the full edited text to a markdown file if savedText exists
+    if (item.type === 'file' && item.savedText) {
+      const cleanName = item.name.replace(/\.[^/.]+$/, ""); // Remove extension
+      const fullDocMarkdownPath = path.join(docDir, `${cleanName}_edited.md`);
+      await fs.promises.writeFile(fullDocMarkdownPath, item.savedText);
+      console.log(`Saved edited document text to: ${fullDocMarkdownPath}`);
+    }
+
     // Save metadata (now with URLs instead of base64)
     await fs.promises.writeFile(
       path.join(docDir, 'metadata.json'), 

@@ -47,21 +47,20 @@ const EditorView: React.FC<EditorViewProps> = ({ doc, onBack, onSave }) => {
   useEffect(() => {
     // If we have previously saved text from the server, use it.
     // Otherwise, reconstruct from blocks using default filters.
-    if (doc.savedText && showFullDocument) {
+    if (doc.savedText) {
       setCleanText(doc.savedText);
     } else {
       setCleanText(getDisplayedText());
     }
+    setIsSaved(true); // Reset save state when loading a new document
     // We only want to run this init logic once when doc changes, 
     // we don't depend on selectedLabels here because that's for manual updates later.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc]);
+  }, [doc.id]); // Only re-run when document ID changes
 
-  // Update displayed text when switching view mode or page (in single page mode)
-  useEffect(() => {
-    setCleanText(getDisplayedText());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showFullDocument, activePage]);
+  // Note: Removed the useEffect that was resetting text on view/page change
+  // This was causing manual edits to be lost. Users can now edit the full
+  // document text and save it without losing changes when navigating.
 
   const handleTextChange = (newText: string) => {
     setCleanText(newText);
