@@ -413,6 +413,7 @@ const App: React.FC = () => {
             imageUrl: `data:${image.mimeType};base64,${image.data}`,
             blocks: [],
             status: 'pending',
+            errorDismissed: false,
             retryCount: 0,
             lastError: '',
             nextRetryAt: null,
@@ -443,16 +444,20 @@ const App: React.FC = () => {
     setCurrentView(AppView.UPLOAD);
   }, []);
 
-  const handleSaveDocument = async (docId: string, newText: string, pageSavedTexts?: Record<number, string>) => {
-    const item = items.find((entry) => entry.id === docId);
-    if (!item) {
-      return;
-    }
+  const handlePersistDocument = useCallback(async (updatedDoc: DocumentData) => {
+    const savedDoc = await saveItem(updatedDoc) as DocumentData;
+    setItems((current) => current.map((entry) => (entry.id === savedDoc.id ? savedDoc : entry)));
+    return savedDoc;
+  }, []);
 
-    const updatedItem = { ...item, savedText: newText, pageSavedTexts };
-    await saveItem(updatedItem);
-    setItems((current) => current.map((entry) => (entry.id === docId ? updatedItem : entry)));
-  };
+  const handleRefreshDocument = useCallback(async (docId: string) => {
+    const data = await getAllItems();
+    const refreshedDoc = data.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
+    startTransition(() => {
+      setItems((current) => reconcileItems(current, data));
+    });
+    return refreshedDoc ?? null;
+  }, []);
 
   const goToHome = () => {
     setCurrentView(AppView.DASHBOARD);
@@ -579,7 +584,8 @@ const App: React.FC = () => {
               <EditorView
                 doc={activeDoc}
                 onBack={() => setCurrentView(AppView.DASHBOARD)}
-                onSave={handleSaveDocument}
+                onPersistDocument={handlePersistDocument}
+                onRefreshDocument={handleRefreshDocument}
                 models={models}
                 prompts={prompts}
                 onOpenSettings={openSettings}

@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDocumentProcessingManager } from '../services/documentProcessing.js';
+import { createDocumentProcessingManager, normalizeDocumentRuntimeState } from '../services/documentProcessing.js';
 
 const createdDirs = [];
 
@@ -43,6 +43,7 @@ const createPage = (docId, pageNumber, overrides = {}) => ({
   imageUrl: `/api/data/${docId}/page_${pageNumber}.png`,
   blocks: [],
   status: 'pending',
+  errorDismissed: false,
   retryCount: 0,
   lastError: '',
   nextRetryAt: null,
@@ -90,6 +91,30 @@ afterEach(async () => {
 });
 
 describe('document processing manager', () => {
+  it('treats dismissed page errors as resolved in document totals', () => {
+    const doc = createMetadata({
+      docId: 'doc-dismissed-error',
+      pages: [
+        createPage('doc-dismissed-error', 1, {
+          status: 'error',
+          errorDismissed: true,
+          lastError: '400: Blank page',
+        }),
+        createPage('doc-dismissed-error', 2, {
+          status: 'completed',
+          blocks: createBlocks(2),
+        }),
+      ],
+    });
+
+    normalizeDocumentRuntimeState(doc);
+
+    expect(doc.status).toBe('ready');
+    expect(doc.processedPages).toBe(1);
+    expect(doc.failedPages).toBe(0);
+    expect(doc.pages[0].errorDismissed).toBe(true);
+  });
+
   it('persists retry attempts and eventually completes after a retryable AI error', async () => {
     const docId = 'doc-retry-success';
     const metadata = createMetadata({

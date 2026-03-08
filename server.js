@@ -696,6 +696,7 @@ app.post('/api/reprocess-page', async (req, res) => {
 
       docData.pages[parsedPageIndex].blocks = blocks;
       docData.pages[parsedPageIndex].status = 'completed';
+      docData.pages[parsedPageIndex].errorDismissed = false;
       docData.pages[parsedPageIndex].retryCount = 0;
       docData.pages[parsedPageIndex].lastError = '';
       docData.pages[parsedPageIndex].nextRetryAt = null;
@@ -711,6 +712,7 @@ app.post('/api/reprocess-page', async (req, res) => {
     } catch (error) {
       docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
       docData.pages[parsedPageIndex].lastError = formatProcessingError(error);
+      docData.pages[parsedPageIndex].errorDismissed = false;
       if (docData.pages[parsedPageIndex].status !== 'completed') {
         docData.pages[parsedPageIndex].status = 'error';
         docData.pages[parsedPageIndex].nextRetryAt = null;

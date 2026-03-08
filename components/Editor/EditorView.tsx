@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DocumentData, BlockLabel, ProcessingOptions, PromptPreset, SettingsTab } from '../../types';
+import { DocumentData, BlockLabel, ProcessingOptions, PromptPreset, SettingsTab, TextBlock } from '../../types';
 import ImageViewer from './ImageViewer';
 import TextEditor from './TextEditor';
 import { reconstructCleanText, generateMarkdown, generateHTML, generateEPUB } from '../../utils/reconstruction';
 import {
+  AlertCircleIcon,
   ArrowLeftIcon,
   CheckCircleIcon,
   ChevronLeftIcon,
@@ -22,17 +23,20 @@ import { reprocessPage } from '../../services/geminiService';
 import ProcessingOptionsSelector from '../ProcessingOptionsSelector';
 import IconActionButton from '../IconActionButton';
 import { DEFAULT_MODELS, GeminiModel } from '../../utils/modelStorage';
+import { getIssuePageIndexes, getPageIssueType } from '../../utils/pageReview';
 
 interface EditorViewProps {
   doc: DocumentData;
   onBack: () => void;
-  onSave: (docId: string, newText: string, pageSavedTexts?: Record<number, string>) => void;
+  onPersistDocument: (doc: DocumentData) => Promise<DocumentData>;
+  onRefreshDocument: (docId: string) => Promise<DocumentData | null>;
   models: GeminiModel[];
   prompts: PromptPreset[];
   onOpenSettings: (tab?: SettingsTab) => void;
 }
 
 type MobilePanel = 'preview' | 'editor';
+type ReprocessScope = 'current' | 'issues';
 
 const MIN_EDITOR_WIDTH = 30;
 const MAX_EDITOR_WIDTH = 70;
@@ -41,18 +45,28 @@ const DEFAULT_MODEL_ID = DEFAULT_MODELS[0]?.id ?? 'gemini-flash-latest';
 const EditorView: React.FC<EditorViewProps> = ({
   doc,
   onBack,
-  onSave,
+  onPersistDocument,
+  onRefreshDocument,
   models,
   prompts,
   onOpenSettings,
 }) => {
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const [workingDoc, setWorkingDoc] = useState(doc);
   const [activePage, setActivePage] = useState(0);
   const [cleanText, setCleanText] = useState('');
   const [isSaved, setIsSaved] = useState(true);
+  const [isSavingDocument, setIsSavingDocument] = useState(false);
   const [showCopyFeedback, setShowCopyFeedback] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
+  const [isUpdatingErrorDismissal, setIsUpdatingErrorDismissal] = useState(false);
   const [showReprocessModal, setShowReprocessModal] = useState(false);
+  const [reprocessScope, setReprocessScope] = useState<ReprocessScope>('current');
+  const [reprocessProgress, setReprocessProgress] = useState<{
+    current: number;
+    total: number;
+    pageNumber: number;
+  } | null>(null);
   const [showFullDocument, setShowFullDocument] = useState(true);
   const [showEditor, setShowEditor] = useState(true);
   const [editorWidth, setEditorWidth] = useState(50);
@@ -70,13 +84,22 @@ const EditorView: React.FC<EditorViewProps> = ({
     removeReferences: true,
   });
 
-  const getPageText = (pageIndex: number, labels: BlockLabel[], overrides: Record<number, string>) => {
-    return overrides[pageIndex] ?? reconstructCleanText([doc.pages[pageIndex]], labels);
+  const getPageText = (
+    sourceDoc: DocumentData,
+    pageIndex: number,
+    labels: BlockLabel[],
+    overrides: Record<number, string>
+  ) => {
+    return overrides[pageIndex] ?? reconstructCleanText([sourceDoc.pages[pageIndex]], labels);
   };
 
-  const buildFullDocumentText = (labels: BlockLabel[], overrides: Record<number, string>) => {
-    const joinedText = doc.pages
-      .map((_, pageIndex) => getPageText(pageIndex, labels, overrides))
+  const buildFullDocumentText = (
+    sourceDoc: DocumentData,
+    labels: BlockLabel[],
+    overrides: Record<number, string>
+  ) => {
+    const joinedText = sourceDoc.pages
+      .map((_, pageIndex) => getPageText(sourceDoc, pageIndex, labels, overrides))
       .filter(Boolean)
       .join('\n\n');
 
@@ -84,6 +107,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   };
 
   const getDisplayedText = (
+    sourceDoc: DocumentData,
     fullDoc: boolean,
     pageIndex: number,
     labels: BlockLabel[],
@@ -91,20 +115,25 @@ const EditorView: React.FC<EditorViewProps> = ({
     preferSavedDocument: boolean = false
   ) => {
     if (fullDoc) {
-      if (preferSavedDocument && doc.savedText && Object.keys(overrides).length === 0) {
-        return doc.savedText;
+      if (preferSavedDocument && sourceDoc.savedText && Object.keys(overrides).length === 0) {
+        return sourceDoc.savedText;
       }
 
-      return buildFullDocumentText(labels, overrides);
+      return buildFullDocumentText(sourceDoc, labels, overrides);
     }
 
-    return getPageText(pageIndex, labels, overrides);
+    return getPageText(sourceDoc, pageIndex, labels, overrides);
   };
 
   useEffect(() => {
+    setWorkingDoc(doc);
+  }, [doc]);
+
+  useEffect(() => {
     const initialPageOverrides = doc.pageSavedTexts ?? {};
+    setActivePage(0);
     setPageTextOverrides(initialPageOverrides);
-    setCleanText(getDisplayedText(showFullDocument, activePage, selectedLabels, initialPageOverrides, true));
+    setCleanText(getDisplayedText(doc, showFullDocument, 0, selectedLabels, initialPageOverrides, true));
     setIsSaved(true);
     setShowEditor(true);
     setMobilePanel('preview');
@@ -112,7 +141,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   }, [doc.id]);
 
   useEffect(() => {
-    const nextText = getDisplayedText(showFullDocument, activePage, selectedLabels, pageTextOverrides);
+    const nextText = getDisplayedText(workingDoc, showFullDocument, activePage, selectedLabels, pageTextOverrides);
     setCleanText(nextText);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showFullDocument, activePage]);
@@ -214,7 +243,7 @@ const EditorView: React.FC<EditorViewProps> = ({
         ? current.filter((entry) => entry !== label)
         : [...current, label];
 
-      const nextText = getDisplayedText(showFullDocument, activePage, nextLabels, pageTextOverrides);
+      const nextText = getDisplayedText(workingDoc, showFullDocument, activePage, nextLabels, pageTextOverrides);
       setCleanText(nextText);
       setIsSaved(false);
 
@@ -222,56 +251,222 @@ const EditorView: React.FC<EditorViewProps> = ({
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const nextPageTextOverrides = showFullDocument
       ? pageTextOverrides
       : { ...pageTextOverrides, [activePage]: cleanText };
     const textToSave = showFullDocument
       ? cleanText
-      : buildFullDocumentText(selectedLabels, nextPageTextOverrides);
+      : buildFullDocumentText(workingDoc, selectedLabels, nextPageTextOverrides);
 
     if (!showFullDocument) {
       setPageTextOverrides(nextPageTextOverrides);
     }
 
-    onSave(doc.id, textToSave, nextPageTextOverrides);
-    setIsSaved(true);
+    setIsSavingDocument(true);
+
+    try {
+      const savedDoc = await onPersistDocument({
+        ...workingDoc,
+        savedText: textToSave,
+        pageSavedTexts: nextPageTextOverrides,
+      });
+      setWorkingDoc(savedDoc);
+      setPageTextOverrides(savedDoc.pageSavedTexts ?? nextPageTextOverrides);
+      setIsSaved(true);
+    } catch (error: any) {
+      console.error('Save failed', error);
+      alert(`Failed to save document: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsSavingDocument(false);
+    }
   };
 
   const handleCopyTitle = () => {
-    navigator.clipboard.writeText(doc.name);
+    navigator.clipboard.writeText(workingDoc.name);
     setShowCopyFeedback(true);
     setTimeout(() => setShowCopyFeedback(false), 1000);
   };
 
-  const handleReprocessDocumentPage = async () => {
-    setIsReprocessing(true);
+  const applyRefreshedDocument = (nextDoc: DocumentData, overrides: Record<number, string> = pageTextOverrides) => {
+    setWorkingDoc(nextDoc);
+    setCleanText(getDisplayedText(nextDoc, showFullDocument, activePage, selectedLabels, overrides));
+  };
+
+  const applyRefreshedDocumentState = (
+    nextDoc: DocumentData,
+    overrides: Record<number, string> = pageTextOverrides,
+    nextActivePage: number = activePage
+  ) => {
+    setWorkingDoc(nextDoc);
+    setActivePage(nextActivePage);
+    setCleanText(getDisplayedText(nextDoc, showFullDocument, nextActivePage, selectedLabels, overrides));
+  };
+
+  const applyReprocessedPage = (
+    sourceDoc: DocumentData,
+    sourceOverrides: Record<number, string>,
+    pageIndex: number,
+    blocks: TextBlock[]
+  ) => {
+    const nextOverrides = { ...sourceOverrides };
+    delete nextOverrides[pageIndex];
+
+    const nextPages = sourceDoc.pages.map((page, currentPageIndex) => (
+      currentPageIndex === pageIndex
+        ? {
+            ...page,
+            blocks,
+            status: 'completed' as const,
+            errorDismissed: false,
+            retryCount: 0,
+            lastError: '',
+            nextRetryAt: null,
+            lastAttemptAt: Date.now(),
+          }
+        : page
+    ));
+
+    return {
+      nextDoc: {
+        ...sourceDoc,
+        pages: nextPages,
+      },
+      nextOverrides,
+    };
+  };
+
+  const handleToggleErrorDismissed = async (dismissed: boolean) => {
+    const activeDocPage = workingDoc.pages[activePage];
+    if (!activeDocPage || activeDocPage.status !== 'error') {
+      return;
+    }
+
+    const nextPages = workingDoc.pages.map((page, pageIndex) => (
+      pageIndex === activePage
+        ? { ...page, errorDismissed: dismissed }
+        : page
+    ));
+    const updatedDoc = { ...workingDoc, pages: nextPages };
+    const previousDoc = workingDoc;
+
+    setWorkingDoc(updatedDoc);
+    setIsUpdatingErrorDismissal(true);
+
     try {
-      const newBlocks = await reprocessPage(
-        doc.id,
-        activePage,
-        reprocessOptions.model,
-        reprocessOptions.processingMode,
-        reprocessOptions.targetLanguage,
-        reprocessOptions.customPrompt,
-        reprocessOptions.removeReferences
-      );
-
-      doc.pages[activePage].blocks = newBlocks;
-      const updatedOverrides = { ...pageTextOverrides };
-      delete updatedOverrides[activePage];
-      setPageTextOverrides(updatedOverrides);
-
-      const nextText = getDisplayedText(showFullDocument, activePage, selectedLabels, updatedOverrides);
-      setCleanText(nextText);
-      setIsSaved(false);
-      setShowReprocessModal(false);
+      const savedDoc = await onPersistDocument(updatedDoc);
+      setWorkingDoc(savedDoc);
     } catch (error: any) {
-      console.error('Reprocess failed', error);
-      alert(`Failed to reprocess page: ${error.message || 'Unknown error'}`);
+      console.error('Failed to update page error visibility', error);
+      setWorkingDoc(previousDoc);
+      alert(`Failed to update page status: ${error.message || 'Unknown error'}`);
     } finally {
+      setIsUpdatingErrorDismissal(false);
+    }
+  };
+
+  const handleOpenCurrentPageReprocess = () => {
+    setReprocessScope('current');
+    setShowReprocessModal(true);
+  };
+
+  const handleOpenIssuePagesReprocess = () => {
+    if (issuePageIndexes.length === 0) {
+      return;
+    }
+
+    setReprocessScope('issues');
+    setShowReprocessModal(true);
+  };
+
+  const handleReprocessPages = async (pageIndexes: number[]) => {
+    if (pageIndexes.length === 0) {
+      return;
+    }
+
+    const docId = workingDoc.id;
+    const multiplePages = pageIndexes.length > 1;
+    let nextDoc = workingDoc;
+    let nextOverrides = pageTextOverrides;
+    let successfulPages = 0;
+    let failedPages = 0;
+
+    setIsReprocessing(true);
+    setShowReprocessModal(false);
+
+    try {
+      for (let index = 0; index < pageIndexes.length; index += 1) {
+        const pageIndex = pageIndexes[index];
+        setReprocessProgress({
+          current: index + 1,
+          total: pageIndexes.length,
+          pageNumber: pageIndex + 1,
+        });
+
+        try {
+          const newBlocks = await reprocessPage(
+            docId,
+            pageIndex,
+            reprocessOptions.model,
+            reprocessOptions.processingMode,
+            reprocessOptions.targetLanguage,
+            reprocessOptions.customPrompt,
+            reprocessOptions.removeReferences
+          );
+
+          const updatedState = applyReprocessedPage(nextDoc, nextOverrides, pageIndex, newBlocks);
+          nextDoc = updatedState.nextDoc;
+          nextOverrides = updatedState.nextOverrides;
+          successfulPages += 1;
+          setPageTextOverrides(nextOverrides);
+          applyRefreshedDocumentState(nextDoc, nextOverrides, pageIndex);
+        } catch (error) {
+          failedPages += 1;
+          console.error(`Reprocess failed for page ${pageIndex + 1}`, error);
+        }
+      }
+
+      const refreshedDoc = await onRefreshDocument(docId);
+      if (refreshedDoc) {
+        applyRefreshedDocumentState(
+          refreshedDoc,
+          nextOverrides,
+          pageIndexes[pageIndexes.length - 1]
+        );
+      }
+
+      setPageTextOverrides(nextOverrides);
+      if (successfulPages > 0) {
+        setIsSaved(false);
+      }
+
+      if (!multiplePages && failedPages > 0) {
+        alert(`Failed to reprocess page ${pageIndexes[0] + 1}. It still needs review.`);
+      } else if (multiplePages && failedPages > 0) {
+        alert(`${failedPages} pages could not be reprocessed and still need review.`);
+      }
+    } catch (error: any) {
+      const refreshedDoc = await onRefreshDocument(docId);
+      if (refreshedDoc) {
+        applyRefreshedDocument(refreshedDoc, nextOverrides);
+      }
+
+      const label = multiplePages ? 'pages' : 'page';
+      console.error('Reprocess failed', error);
+      alert(`Failed to reprocess ${label}: ${error.message || 'Unknown error'}`);
+    } finally {
+      setReprocessProgress(null);
       setIsReprocessing(false);
     }
+  };
+
+  const handleSubmitReprocess = async () => {
+    if (reprocessScope === 'issues') {
+      await handleReprocessPages(issuePageIndexes);
+      return;
+    }
+
+    await handleReprocessPages([activePage]);
   };
 
   const handleDownload = async (format: 'md' | 'txt' | 'html' | 'epub') => {
@@ -281,13 +476,13 @@ const EditorView: React.FC<EditorViewProps> = ({
     const fullText = showFullDocument
       ? cleanText
       : (Object.keys(pageTextOverrides).length > 0
-          ? buildFullDocumentText(selectedLabels, pageTextOverrides)
-          : (doc.savedText || reconstructCleanText(doc.pages, selectedLabels)));
+          ? buildFullDocumentText(workingDoc, selectedLabels, pageTextOverrides)
+          : (workingDoc.savedText || reconstructCleanText(workingDoc.pages, selectedLabels)));
 
     if (format === 'html') {
-      blob = generateHTML(fullText, doc.name);
+      blob = generateHTML(fullText, workingDoc.name);
     } else if (format === 'epub') {
-      blob = await generateEPUB(fullText, doc.name);
+      blob = await generateEPUB(fullText, workingDoc.name);
       extension = 'epub';
     } else {
       blob = generateMarkdown(fullText);
@@ -296,7 +491,7 @@ const EditorView: React.FC<EditorViewProps> = ({
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${doc.name.replace(/\.[^/.]+$/, '')}_clean.${extension}`;
+    anchor.download = `${workingDoc.name.replace(/\.[^/.]+$/, '')}_clean.${extension}`;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
@@ -312,6 +507,44 @@ const EditorView: React.FC<EditorViewProps> = ({
     BlockLabel.FOOTNOTE,
     BlockLabel.CAPTION,
   ];
+
+  const issuePageIndexes = getIssuePageIndexes(workingDoc, pageTextOverrides);
+  const currentPageData = workingDoc.pages[activePage];
+  const currentPageIssueType = currentPageData ? getPageIssueType(currentPageData, pageTextOverrides[activePage]) : null;
+  const currentPageHasError = currentPageIssueType === 'error';
+  const currentPageIsBlank = currentPageIssueType === 'blank';
+  const currentPageErrorDismissed = currentPageData?.errorDismissed === true;
+  const nextIssuePageIndex = issuePageIndexes.length === 0
+    ? null
+    : (issuePageIndexes.find((pageIndex) => pageIndex > activePage) ?? issuePageIndexes[0]);
+  const errorSummaryLabel = issuePageIndexes.length === 1
+    ? '1 page still needs review'
+    : `${issuePageIndexes.length} pages still need review`;
+  const jumpToIssueLabel = nextIssuePageIndex === null
+    ? 'No issues pending'
+    : (nextIssuePageIndex === activePage
+        ? 'Current issue'
+        : `Jump to Page ${nextIssuePageIndex + 1}`);
+  const showErrorBanner = issuePageIndexes.length > 0;
+  const pageInputWidthCh = Math.max(3, String(workingDoc.pages.length).length + 1);
+  const batchReprocessLabel = issuePageIndexes.length === 1
+    ? 'Reprocess issue'
+    : `Reprocess ${issuePageIndexes.length} issues`;
+  const reprocessModalTitle = reprocessScope === 'issues'
+    ? (issuePageIndexes.length === 1 ? 'Reprocess 1 issue page' : `Reprocess ${issuePageIndexes.length} issue pages`)
+    : `Reprocess Page ${activePage + 1}`;
+  const reprocessModalDescription = reprocessScope === 'issues'
+    ? 'Pages with OCR errors or blank transcription will be reprocessed one by one with these options.'
+    : 'Use a different model or a saved prompt without leaving the editor.';
+  const reprocessActionLabel = reprocessScope === 'issues'
+    ? (isReprocessing ? 'Processing pages' : (issuePageIndexes.length === 1 ? 'Reprocess issue page' : `Reprocess ${issuePageIndexes.length} pages`))
+    : (isReprocessing ? 'Processing' : 'Reprocess page');
+  const reprocessOverlayTitle = reprocessProgress?.total && reprocessProgress.total > 1
+    ? `Reprocessing pages (${reprocessProgress.current}/${reprocessProgress.total})`
+    : `Reprocessing Page ${reprocessProgress?.pageNumber ?? activePage + 1}...`;
+  const reprocessOverlayDescription = reprocessProgress?.total && reprocessProgress.total > 1
+    ? `Working through issue pages one by one. Current page: ${reprocessProgress.pageNumber}.`
+    : 'Please wait while we analyze the document with Gemini AI.';
 
   const filterControls = (
     <div className="flex flex-wrap items-center gap-3 py-1">
@@ -380,26 +613,33 @@ const EditorView: React.FC<EditorViewProps> = ({
           <ChevronLeftIcon className="h-4 w-4" />
         </button>
 
-        <div className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-sm dark:bg-slate-700">
+        <div className="flex shrink-0 items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-sm dark:bg-slate-700">
           <span className="font-medium text-slate-600 dark:text-slate-300">Page</span>
           <input
-            type="number"
-            min={1}
-            max={doc.pages.length}
-            value={activePage + 1}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={String(activePage + 1)}
             onChange={(event) => {
-              const value = parseInt(event.target.value, 10);
-              if (!Number.isNaN(value) && value >= 1 && value <= doc.pages.length) {
+              const rawValue = event.target.value.replace(/\D/g, '');
+              if (!rawValue) {
+                return;
+              }
+
+              const value = parseInt(rawValue, 10);
+              if (!Number.isNaN(value) && value >= 1 && value <= workingDoc.pages.length) {
                 setActivePage(value - 1);
               }
             }}
-            className="w-12 rounded-full border border-slate-300 bg-white px-2 py-1 text-center text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+            style={{ width: `${pageInputWidthCh}ch` }}
+            className="shrink-0 rounded-full border border-slate-300 bg-white px-3 py-1 text-center text-sm tabular-nums text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+            aria-label="Current page number"
           />
-          <span className="font-medium text-slate-600 dark:text-slate-300">of {doc.pages.length}</span>
+          <span className="font-medium text-slate-600 dark:text-slate-300">of {workingDoc.pages.length}</span>
         </div>
 
         <button
-          disabled={activePage === doc.pages.length - 1}
+          disabled={activePage === workingDoc.pages.length - 1}
           onClick={() => setActivePage((page) => page + 1)}
           className="rounded-full bg-slate-100 p-2 text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
           title="Next page"
@@ -407,8 +647,8 @@ const EditorView: React.FC<EditorViewProps> = ({
           <ChevronRightIcon className="h-4 w-4" />
         </button>
         <button
-          disabled={activePage === doc.pages.length - 1}
-          onClick={() => setActivePage(doc.pages.length - 1)}
+          disabled={activePage === workingDoc.pages.length - 1}
+          onClick={() => setActivePage(workingDoc.pages.length - 1)}
           className="rounded-full bg-slate-100 p-2 text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600"
           title="Last page"
         >
@@ -416,13 +656,24 @@ const EditorView: React.FC<EditorViewProps> = ({
         </button>
       </div>
 
-      <IconActionButton
-        icon={<RefreshCwIcon className="h-4 w-4" />}
-        label="Reprocess"
-        isActive={showReprocessModal}
-        variant="primary"
-        onClick={() => setShowReprocessModal(true)}
-      />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {nextIssuePageIndex !== null && (
+          <IconActionButton
+            icon={<AlertCircleIcon className="h-4 w-4" />}
+            label={jumpToIssueLabel}
+            variant="danger"
+            isActive={currentPageIssueType !== null}
+            onClick={() => setActivePage(nextIssuePageIndex)}
+          />
+        )}
+        <IconActionButton
+          icon={<RefreshCwIcon className="h-4 w-4" />}
+          label="Reprocess"
+          isActive={showReprocessModal}
+          variant="primary"
+          onClick={handleOpenCurrentPageReprocess}
+        />
+      </div>
     </div>
   );
 
@@ -432,7 +683,7 @@ const EditorView: React.FC<EditorViewProps> = ({
       style={isMobileLayout ? undefined : { width: showEditor ? `${100 - editorWidth}%` : '100%' }}
     >
       <div className="flex-1 overflow-hidden bg-slate-100 dark:bg-slate-900">
-        {doc.pages[activePage] && <ImageViewer page={doc.pages[activePage]} />}
+        {workingDoc.pages[activePage] && <ImageViewer page={workingDoc.pages[activePage]} />}
       </div>
       {renderPagination()}
     </div>
@@ -498,8 +749,8 @@ const EditorView: React.FC<EditorViewProps> = ({
             />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-lg font-semibold text-slate-900 dark:text-white" title={doc.name}>
-                  {doc.name}
+                <h1 className="truncate text-lg font-semibold text-slate-900 dark:text-white" title={workingDoc.name}>
+                  {workingDoc.name}
                 </h1>
                 <div className="relative flex items-center">
                   <button
@@ -516,7 +767,7 @@ const EditorView: React.FC<EditorViewProps> = ({
                   )}
                 </div>
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
-                  {doc.pages.length} pages
+                  {workingDoc.pages.length} pages
                 </span>
               </div>
             </div>
@@ -525,9 +776,10 @@ const EditorView: React.FC<EditorViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <IconActionButton
               icon={<CheckCircleIcon className="h-4 w-4" />}
-              label={isSaved ? 'Saved' : 'Save'}
-              isActive={!isSaved}
-              variant={isSaved ? 'success' : 'primary'}
+              label={isSavingDocument ? 'Saving' : (isSaved ? 'Saved' : 'Save')}
+              isActive={isSavingDocument || !isSaved}
+              variant={isSaved && !isSavingDocument ? 'success' : 'primary'}
+              disabled={isSavingDocument}
               onClick={handleSave}
             />
 
@@ -559,10 +811,83 @@ const EditorView: React.FC<EditorViewProps> = ({
               icon={<RefreshCwIcon className="h-4 w-4" />}
               label="Reprocess"
               isActive={showReprocessModal}
-              onClick={() => setShowReprocessModal(true)}
+              onClick={handleOpenCurrentPageReprocess}
             />
+            {issuePageIndexes.length > 0 && (
+              <IconActionButton
+                icon={<AlertCircleIcon className="h-4 w-4" />}
+                label={batchReprocessLabel}
+                variant="danger"
+                onClick={handleOpenIssuePagesReprocess}
+              />
+            )}
           </div>
         </div>
+
+        {showErrorBanner && (
+          <div className={`mt-4 rounded-3xl border px-4 py-3 ${
+            currentPageHasError && currentPageErrorDismissed !== true
+              ? 'border-red-200 bg-red-50 dark:border-red-900/40 dark:bg-red-900/10'
+              : 'border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10'
+          }`}>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                {issuePageIndexes.length > 0 && (
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
+                    {errorSummaryLabel}
+                  </p>
+                )}
+                {currentPageHasError ? (
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    Page {activePage + 1}: {currentPageErrorDismissed
+                      ? 'This page error is hidden from the dashboard.'
+                      : (currentPageData?.lastError || 'This page needs review before it is considered resolved.')}
+                  </p>
+                ) : currentPageIsBlank ? (
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    Page {activePage + 1}: this page has no transcription yet. You can reprocess just this page or launch the batch action for all issue pages.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    Use the shortcuts to jump directly to pages with OCR errors or blank transcription, or reprocess all of them one by one.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {nextIssuePageIndex !== null && (
+                  <IconActionButton
+                    icon={<AlertCircleIcon className="h-4 w-4" />}
+                    label={jumpToIssueLabel}
+                    variant="danger"
+                    isActive={currentPageIssueType !== null}
+                    onClick={() => setActivePage(nextIssuePageIndex)}
+                  />
+                )}
+                {issuePageIndexes.length > 0 && (
+                  <IconActionButton
+                    icon={<RefreshCwIcon className="h-4 w-4" />}
+                    label={batchReprocessLabel}
+                    variant="primary"
+                    onClick={handleOpenIssuePagesReprocess}
+                  />
+                )}
+                {currentPageHasError && (
+                  <label className="flex items-center gap-2 rounded-full bg-white/80 px-3 py-2 text-sm text-slate-700 shadow-sm dark:bg-slate-800/80 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={currentPageErrorDismissed}
+                      disabled={isUpdatingErrorDismissal}
+                      onChange={(event) => handleToggleErrorDismissed(event.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900"
+                    />
+                    <span>{isUpdatingErrorDismissal ? 'Updating...' : 'Hide this error from dashboard'}</span>
+                  </label>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {isMobileLayout && (
           <div className="mt-4 flex flex-wrap gap-2">
@@ -610,9 +935,9 @@ const EditorView: React.FC<EditorViewProps> = ({
           <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-xl dark:bg-slate-800">
             <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-700">
               <div>
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white">Reprocess Page {activePage + 1}</h3>
+                <h3 className="text-lg font-bold text-slate-800 dark:text-white">{reprocessModalTitle}</h3>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Use a different model or a saved prompt without leaving the editor.
+                  {reprocessModalDescription}
                 </p>
               </div>
               <button
@@ -641,11 +966,11 @@ const EditorView: React.FC<EditorViewProps> = ({
               />
               <IconActionButton
                 icon={<RefreshCwIcon className="h-4 w-4" />}
-                label={isReprocessing ? 'Processing' : 'Reprocess page'}
+                label={reprocessActionLabel}
                 isActive
                 variant="primary"
-                disabled={isReprocessing}
-                onClick={handleReprocessDocumentPage}
+                disabled={isReprocessing || (reprocessScope === 'issues' && issuePageIndexes.length === 0)}
+                onClick={handleSubmitReprocess}
               />
             </div>
           </div>
@@ -656,9 +981,9 @@ const EditorView: React.FC<EditorViewProps> = ({
         <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="flex flex-col items-center rounded-3xl bg-white p-8 shadow-2xl dark:bg-slate-800">
             <LoaderIcon className="mb-4 h-16 w-16 animate-spin text-blue-600 dark:text-blue-400" />
-            <h3 className="mb-2 text-xl font-bold text-slate-800 dark:text-white">Reprocessing Page...</h3>
+            <h3 className="mb-2 text-xl font-bold text-slate-800 dark:text-white">{reprocessOverlayTitle}</h3>
             <p className="max-w-xs text-center text-slate-500 dark:text-slate-400">
-              Please wait while we analyze the document with Gemini AI.
+              {reprocessOverlayDescription}
             </p>
           </div>
         </div>

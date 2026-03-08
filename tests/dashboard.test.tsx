@@ -58,4 +58,16 @@ describe('Dashboard OCR error indicators', () => {
     expect(html).toContain('Processing');
     expect(html).toContain('1 failed page');
   });
+
+  it('hides the failed pages badge once the document no longer reports unresolved errors', () => {
+    const html = renderDashboard([
+      buildDocument({
+        status: 'ready',
+        failedPages: 0,
+      }),
+    ]);
+
+    expect(html).toContain('Ready');
+    expect(html).not.toContain('failed page');
+  });
 });

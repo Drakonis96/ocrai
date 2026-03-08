@@ -41,11 +41,14 @@ export const getPagesPerBatch = (value, fallbackValue = 1) =>
 export const getPageNumber = (page, fallbackValue) =>
   normalizePositiveInteger(page?.pageNumber, fallbackValue);
 
+const isVisibleErrorPage = (page) =>
+  page?.status === 'error' && page?.errorDismissed !== true;
+
 export const getProcessedPageCount = (pages = []) =>
   pages.filter((page) => page?.status === 'completed').length;
 
 export const getFailedPageCount = (pages = []) =>
-  pages.filter((page) => page?.status === 'error').length;
+  pages.filter(isVisibleErrorPage).length;
 
 const getRetryQueueCount = (pages = []) =>
   pages.filter((page) => (
@@ -59,7 +62,7 @@ const getDocumentStatus = (pages = []) => {
     return 'processing';
   }
 
-  if (pages.some((page) => page?.status === 'error')) {
+  if (pages.some(isVisibleErrorPage)) {
     return 'error';
   }
 
@@ -145,6 +148,7 @@ const normalizePageState = (page, pageIndex, { resetInFlightProcessing = false }
     ...(page || {}),
     pageNumber: getPageNumber(page, pageIndex + 1),
     blocks: Array.isArray(page?.blocks) ? page.blocks : [],
+    errorDismissed: page?.errorDismissed === true,
     retryCount: normalizeNonNegativeInteger(page?.retryCount, 0),
     lastError: typeof page?.lastError === 'string' ? page.lastError : '',
     nextRetryAt: normalizeTimestamp(page?.nextRetryAt),
@@ -154,6 +158,7 @@ const normalizePageState = (page, pageIndex, { resetInFlightProcessing = false }
   const rawStatus = typeof page?.status === 'string' ? page.status : 'pending';
   if (rawStatus === 'completed') {
     normalizedPage.status = 'completed';
+    normalizedPage.errorDismissed = false;
     normalizedPage.retryCount = 0;
     normalizedPage.lastError = '';
     normalizedPage.nextRetryAt = null;
@@ -168,10 +173,12 @@ const normalizePageState = (page, pageIndex, { resetInFlightProcessing = false }
 
   if (rawStatus === 'processing') {
     normalizedPage.status = resetInFlightProcessing ? 'pending' : 'processing';
+    normalizedPage.errorDismissed = false;
     return normalizedPage;
   }
 
   normalizedPage.status = 'pending';
+  normalizedPage.errorDismissed = false;
   return normalizedPage;
 };
 
@@ -305,6 +312,7 @@ export const createDocumentProcessingManager = ({
         batch.forEach(({ pageIndex }) => {
           if (docData.pages[pageIndex] && docData.pages[pageIndex].status !== 'completed') {
             docData.pages[pageIndex].status = 'processing';
+            docData.pages[pageIndex].errorDismissed = false;
             docData.pages[pageIndex].lastAttemptAt = attemptStartedAt;
             docData.pages[pageIndex].nextRetryAt = null;
           }
@@ -348,6 +356,7 @@ export const createDocumentProcessingManager = ({
 
             page.blocks = Array.isArray(blocks) ? blocks : [];
             page.status = 'completed';
+            page.errorDismissed = false;
             page.retryCount = 0;
             page.lastError = '';
             page.nextRetryAt = null;
@@ -358,6 +367,7 @@ export const createDocumentProcessingManager = ({
           } catch (error) {
             logger.error(`Error processing page ${pageNumber} of ${docId}:`, error);
             page.lastError = formatProcessingError(error);
+            page.errorDismissed = false;
             page.retryCount = normalizeNonNegativeInteger(page.retryCount, 0) + 1;
 
             if (isRetryableProcessingError(error) && page.retryCount <= runtimeConfig.maxRetries) {
