@@ -26,10 +26,16 @@ import { createPrompt, deletePrompt, getPrompts, updatePrompt } from './services
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// @ts-ignore
 import JSZip from 'jszip';
 
-const PDF_WORKER_URL = 'https://aistudiocdn.com/pdfjs-dist@5.4.449/build/pdf.worker.min.mjs';
-pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
+const hasRealPdfWorkerSupport = typeof window !== 'undefined' && 'Worker' in window;
+
+if (hasRealPdfWorkerSupport) {
+  pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(pdfWorkerUrl, { type: 'module' });
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+}
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
@@ -200,6 +206,10 @@ const App: React.FC = () => {
   };
 
   const convertPdfToImages = async (file: File): Promise<{ data: string; mimeType: string }[]> => {
+    if (!hasRealPdfWorkerSupport) {
+      throw new Error('This browser does not support Web Workers. PDF processing requires a real worker.');
+    }
+
     const arrayBuffer = await file.arrayBuffer();
     const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     const pdf = await loadingTask.promise;

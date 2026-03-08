@@ -153,7 +153,7 @@ app.use(helmet(
             baseUri: ["'self'"],
             formAction: ["'self'"],
             frameAncestors: ["'self'"],
-            workerSrc: ["'self'", 'blob:', 'https://aistudiocdn.com'],
+            workerSrc: ["'self'", 'blob:'],
           },
         },
       }
