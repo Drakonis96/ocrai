@@ -27,6 +27,10 @@ export interface PageData {
   imageUrl: string; // Base64 data URL
   blocks: TextBlock[];
   status: 'pending' | 'processing' | 'completed' | 'error';
+  retryCount?: number;
+  lastError?: string;
+  nextRetryAt?: number | null;
+  lastAttemptAt?: number | null;
 }
 
 export type FileSystemItemType = 'file' | 'folder';
@@ -53,6 +57,8 @@ export interface DocumentData extends FileSystemItem {
   // Progress tracking
   totalPages: number;
   processedPages: number;
+  failedPages: number;
+  retryingPages?: number;
   // Persisted user edits
   savedText?: string;
   pageSavedTexts?: Record<number, string>;

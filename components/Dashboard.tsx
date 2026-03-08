@@ -34,6 +34,11 @@ const STATUS_ORDER: Record<DocumentData['status'], number> = {
   error: 3,
 };
 
+const canOpenDocument = (doc: DocumentData) => doc.status === 'ready' || doc.status === 'error';
+
+const getFailedPagesLabel = (failedPages: number) =>
+  failedPages === 1 ? '1 failed page' : `${failedPages} failed pages`;
+
 const Dashboard: React.FC<DashboardProps> = ({
   items,
   currentFolderId,
@@ -514,11 +519,16 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
         {new Date(doc.uploadDate).toLocaleDateString()}
       </td>
       <td className="px-6 py-4">
-        <StatusWithProgress status={doc.status} processed={doc.processedPages} total={doc.totalPages} />
+        <StatusWithProgress
+          status={doc.status}
+          processed={doc.processedPages}
+          total={doc.totalPages}
+          failedPages={doc.failedPages}
+        />
       </td>
       <td className="px-6 py-4">
         <div className="flex items-center justify-end gap-2">
-          {doc.status === 'ready' && (
+          {canOpenDocument(doc) && (
             <IconActionButton
               icon={<FileIcon className="h-4 w-4" />}
               label="Open"
@@ -642,13 +652,18 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
           </div>
 
           <div className="mt-4">
-            <StatusWithProgress status={doc.status} processed={doc.processedPages} total={doc.totalPages} />
+            <StatusWithProgress
+              status={doc.status}
+              processed={doc.processedPages}
+              total={doc.totalPages}
+              failedPages={doc.failedPages}
+            />
           </div>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        {doc.status === 'ready' && (
+        {canOpenDocument(doc) && (
           <IconActionButton
             icon={<FileIcon className="h-4 w-4" />}
             label="Open"
@@ -675,31 +690,45 @@ const StatusWithProgress = memo(({
   status,
   processed,
   total,
+  failedPages,
 }: {
   status: DocumentData['status'];
   processed: number;
   total: number;
+  failedPages: number;
 }) => {
+  const failedBadge = failedPages > 0 ? (
+    <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-300">
+      <AlertCircleIcon className="mr-1 h-3 w-3" /> {getFailedPagesLabel(failedPages)}
+    </span>
+  ) : null;
+
   if (status === 'ready') {
     return (
-      <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
-        <CheckCircleIcon className="mr-1 h-3 w-3" /> Ready
-      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-300">
+          <CheckCircleIcon className="mr-1 h-3 w-3" /> Ready
+        </span>
+        {failedBadge}
+      </div>
     );
   }
 
   if (status === 'error') {
     return (
-      <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-300">
-        <AlertCircleIcon className="mr-1 h-3 w-3" /> Error
-      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-300">
+          <AlertCircleIcon className="mr-1 h-3 w-3" /> Error
+        </span>
+        {failedBadge}
+      </div>
     );
   }
 
   const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
 
   return (
-    <div className="w-full max-w-[180px]">
+    <div className="w-full max-w-[220px]">
       <div className="mb-1 flex justify-between text-xs text-slate-600 dark:text-slate-400">
         <span>Processing</span>
         <span>{processed}/{total}</span>
@@ -710,6 +739,7 @@ const StatusWithProgress = memo(({
           style={{ width: `${percentage}%` }}
         />
       </div>
+      {failedBadge && <div className="mt-2">{failedBadge}</div>}
     </div>
   );
 });

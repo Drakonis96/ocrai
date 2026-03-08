@@ -19,6 +19,10 @@ export default defineConfig(({ mode }) => {
     preview: {
       port: 5037,
       host: true
+    },
+    test: {
+      environment: 'node',
+      include: ['tests/**/*.test.{js,ts,tsx}'],
     }
   };
 });

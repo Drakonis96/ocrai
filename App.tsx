@@ -407,11 +407,16 @@ const App: React.FC = () => {
           pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
           totalPages: images.length,
           processedPages: 0,
+          failedPages: 0,
           pages: images.map((image, index) => ({
             pageNumber: index + 1,
             imageUrl: `data:${image.mimeType};base64,${image.data}`,
             blocks: [],
             status: 'pending',
+            retryCount: 0,
+            lastError: '',
+            nextRetryAt: null,
+            lastAttemptAt: null,
           })),
         };
 

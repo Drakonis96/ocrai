@@ -9,6 +9,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { handleLoginAttempt, verifySession, logoutSession } from './services/authService.js';
+import {
+  createDocumentProcessingManager,
+  formatProcessingError,
+  getPageNumber,
+  getPagesPerBatch,
+  normalizeDocumentRuntimeState,
+} from './services/documentProcessing.js';
 
 // Load environment variables
 dotenv.config({ path: '.env.local' });
@@ -38,7 +45,6 @@ const CONFIGURED_CORS_ORIGINS = (process.env.CORS_ORIGIN || '')
   .filter(Boolean);
 const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const SAFE_FILE_BASENAME_PATTERN = /[^A-Za-z0-9._-]+/g;
-const DEFAULT_PAGES_PER_BATCH = 1;
 const ALLOWED_IMAGE_MIME_TYPES = new Map([
   ['image/jpeg', 'jpg'],
   ['image/jpg', 'jpg'],
@@ -104,13 +110,6 @@ const normalizePositiveInteger = (value, fallbackValue) => {
   const normalizedValue = Math.trunc(parsedValue);
   return normalizedValue > 0 ? normalizedValue : fallbackValue;
 };
-
-const getPagesPerBatch = (value) => normalizePositiveInteger(value, DEFAULT_PAGES_PER_BATCH);
-const getPageNumber = (page, fallbackValue) => normalizePositiveInteger(page?.pageNumber, fallbackValue);
-
-const getProcessedPageCount = (pages = []) => pages.filter((page) => (
-  page?.status === 'completed' || page?.status === 'error'
-)).length;
 
 const findPageIndexByNumber = (pages, pageNumber, fallbackIndex) => {
   const targetPageNumber = normalizePositiveInteger(pageNumber, fallbackIndex + 1);
@@ -617,163 +616,28 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
   }
 }
 
-const activeProcessing = new Set();
-
-async function processDocumentBackground(docId) {
-  if (activeProcessing.has(docId)) {
-    console.log(`Document ${docId} is already being processed.`);
-    return;
-  }
-  activeProcessing.add(docId);
-  console.log(`Starting background processing for ${docId}`);
-  
-  try {
-    const docDir = resolveDocumentDir(docId);
-    const metadataPath = path.join(docDir, 'metadata.json');
-
-    // Wait a bit to ensure file write is complete
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Retry logic for reading metadata
-    let docData = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-            if (fs.existsSync(metadataPath)) {
-                const content = await fs.promises.readFile(metadataPath, 'utf-8');
-                docData = JSON.parse(content);
-                break;
-            }
-        } catch (e) {
-            console.warn(`Attempt ${attempt + 1} to read metadata failed: ${e.message}`);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-    }
-
-    if (!docData) {
-        console.error(`Failed to read metadata for ${docId} after multiple attempts.`);
-        activeProcessing.delete(docId);
-        return;
-    }
-
-    docData.pages = Array.isArray(docData.pages) ? docData.pages : [];
-    docData.pages.forEach((page, index) => {
-      page.pageNumber = getPageNumber(page, index + 1);
-    });
-    docData.pagesPerBatch = getPagesPerBatch(docData.pagesPerBatch);
-    docData.processedPages = getProcessedPageCount(docData.pages);
-
-    // Serialize metadata writes so concurrent page completions do not overwrite each other.
-    let metadataWriteQueue = Promise.resolve();
-    const persistMetadata = async () => {
-      metadataWriteQueue = metadataWriteQueue
-        .catch(() => {})
-        .then(() => fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2)));
-      await metadataWriteQueue;
-    };
-    
-    // Update status to processing if not already
-    if (docData.status !== 'processing') {
-        docData.status = 'processing';
-    }
-    await persistMetadata();
-
-    const pagesToProcess = docData.pages
-      .map((page, index) => ({
-        pageIndex: index,
-        pageNumber: getPageNumber(page, index + 1),
-      }))
-      .filter(({ pageIndex }) => docData.pages[pageIndex]?.status !== 'completed');
-
-    for (let batchStart = 0; batchStart < pagesToProcess.length; batchStart += docData.pagesPerBatch) {
-      const batch = pagesToProcess.slice(batchStart, batchStart + docData.pagesPerBatch);
-
-      batch.forEach(({ pageIndex }) => {
-        if (docData.pages[pageIndex] && docData.pages[pageIndex].status !== 'completed') {
-          docData.pages[pageIndex].status = 'processing';
-        }
-      });
-      await persistMetadata();
-
-      await Promise.all(batch.map(async ({ pageIndex, pageNumber }) => {
-        const resolvedPageIndex = findPageIndexByNumber(docData.pages, pageNumber, pageIndex);
-        const page = docData.pages[resolvedPageIndex];
-
-        if (!page) {
-          return;
-        }
-
-        console.log(`Processing page ${pageNumber}/${docData.pages.length} for ${docId}`);
-
-        try {
-          const filename = path.basename(page.imageUrl);
-          const imagePath = path.join(docDir, filename);
-          
-          if (!fs.existsSync(imagePath)) {
-              throw new Error(`Image file not found: ${imagePath}`);
-          }
-
-          const imageBuffer = await fs.promises.readFile(imagePath);
-          const base64Image = imageBuffer.toString('base64');
-          const mimeType = path.extname(filename) === '.png' ? 'image/png' : 'image/jpeg';
-
-          const blocks = await processPageWithGemini(
-            base64Image,
-            mimeType,
-            docData.modelUsed,
-            docData.processingMode,
-            docData.targetLanguage,
-            docData.customPrompt,
-            docData.removeReferences !== false
-          );
-
-          const targetPageIndex = findPageIndexByNumber(docData.pages, pageNumber, resolvedPageIndex);
-          const targetPage = docData.pages[targetPageIndex];
-          if (!targetPage) {
-            throw new Error(`Page ${pageNumber} not found in metadata.`);
-          }
-
-          targetPage.blocks = blocks;
-          targetPage.status = 'completed';
-          docData.processedPages = getProcessedPageCount(docData.pages);
-
-          const mdContent = blocksToMarkdown(blocks);
-          await fs.promises.writeFile(path.join(docDir, `page_${pageNumber}.md`), mdContent);
-          await persistMetadata();
-        } catch (err) {
-          console.error(`Error processing page ${pageNumber} of ${docId}:`, err);
-          const targetPageIndex = findPageIndexByNumber(docData.pages, pageNumber, resolvedPageIndex);
-          if (docData.pages[targetPageIndex]) {
-            docData.pages[targetPageIndex].status = 'error';
-          }
-          docData.processedPages = getProcessedPageCount(docData.pages);
-          await persistMetadata();
-        }
-      }));
-    }
-
-    // Final status update
-    docData.processedPages = getProcessedPageCount(docData.pages);
-    const allFailed = docData.pages.length > 0 && docData.pages.every(p => p.status === 'error');
-    docData.status = allFailed ? 'error' : 'ready';
-    await persistMetadata();
-    console.log(`Finished background processing for ${docId}`);
-
-  } catch (e) {
-    console.error(`Fatal error in background processing for ${docId}:`, e);
-    try {
-        const metadataPath = path.join(resolveDocumentDir(docId), 'metadata.json');
-        if (fs.existsSync(metadataPath)) {
-            let currentData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
-            currentData.status = 'error';
-            await fs.promises.writeFile(metadataPath, JSON.stringify(currentData, null, 2));
-        }
-    } catch (ex) {
-        console.error("Failed to update error status", ex);
-    }
-  } finally {
-    activeProcessing.delete(docId);
-  }
-}
+const { processDocumentBackground, resumePendingDocuments } = createDocumentProcessingManager({
+  dataDir: DATA_DIR,
+  resolveDocumentDir,
+  blocksToMarkdown,
+  processPage: async ({
+    base64Image,
+    mimeType,
+    modelName,
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences,
+  }) => processPageWithGemini(
+    base64Image,
+    mimeType,
+    modelName,
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences
+  ),
+});
 
 app.post('/api/reprocess-page', async (req, res) => {
   const { docId, pageIndex, modelName, processingMode, targetLanguage, customPrompt, removeReferences } = req.body;
@@ -793,6 +657,7 @@ app.post('/api/reprocess-page', async (req, res) => {
     }
 
     const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+    normalizeDocumentRuntimeState(docData);
     const page = docData.pages[parsedPageIndex];
     
     if (!page) {
@@ -816,30 +681,44 @@ app.post('/api/reprocess-page', async (req, res) => {
 
     console.log(`Calling Gemini for reprocessing... Model: ${modelName || 'default'}`);
 
-    const blocks = await processPageWithGemini(
-        base64Image, 
-        mimeType, 
-        modelName, 
-        processingMode, 
-        targetLanguage, 
+    try {
+      const blocks = await processPageWithGemini(
+        base64Image,
+        mimeType,
+        modelName,
+        processingMode,
+        targetLanguage,
         customPrompt,
         removeReferences !== false
-    );
+      );
 
-    console.log(`Gemini reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
+      console.log(`Gemini reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
 
-    // Update metadata
-    docData.pages[parsedPageIndex].blocks = blocks;
-    docData.pages[parsedPageIndex].status = 'completed';
-    
-    // Save Markdown for page
-    const mdContent = blocksToMarkdown(blocks);
-    await fs.promises.writeFile(path.join(docDir, `page_${parsedPageIndex + 1}.md`), mdContent);
+      docData.pages[parsedPageIndex].blocks = blocks;
+      docData.pages[parsedPageIndex].status = 'completed';
+      docData.pages[parsedPageIndex].retryCount = 0;
+      docData.pages[parsedPageIndex].lastError = '';
+      docData.pages[parsedPageIndex].nextRetryAt = null;
+      docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
 
-    // Save Metadata
-    await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+      const mdContent = blocksToMarkdown(blocks);
+      await fs.promises.writeFile(path.join(docDir, `page_${parsedPageIndex + 1}.md`), mdContent);
 
-    res.json({ blocks });
+      normalizeDocumentRuntimeState(docData);
+      await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+
+      res.json({ blocks });
+    } catch (error) {
+      docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
+      docData.pages[parsedPageIndex].lastError = formatProcessingError(error);
+      if (docData.pages[parsedPageIndex].status !== 'completed') {
+        docData.pages[parsedPageIndex].status = 'error';
+        docData.pages[parsedPageIndex].nextRetryAt = null;
+      }
+      normalizeDocumentRuntimeState(docData);
+      await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+      throw error;
+    }
 
   } catch (error) {
     handleRouteError(res, 'Reprocess error', error, 'Reprocessing failed');
@@ -945,7 +824,11 @@ app.get('/api/documents', async (req, res) => {
         const metadataPath = path.join(DATA_DIR, entry.name, 'metadata.json');
         try {
           const data = await fs.promises.readFile(metadataPath, 'utf-8');
-          items.push(JSON.parse(data));
+          const parsedItem = JSON.parse(data);
+          if (parsedItem?.type === 'file') {
+            normalizeDocumentRuntimeState(parsedItem);
+          }
+          items.push(parsedItem);
         } catch (err) {
           console.warn(`Skipping invalid directory ${entry.name}:`, err.message);
         }
@@ -1011,7 +894,7 @@ app.post('/api/documents', async (req, res) => {
         }
       }
 
-      item.processedPages = getProcessedPageCount(item.pages);
+      normalizeDocumentRuntimeState(item);
     }
 
     // Save the full edited text to a markdown file if savedText exists
@@ -1153,4 +1036,7 @@ app.listen(PORT, '0.0.0.0', () => {
   } else {
     console.log("GEMINI_API_KEY is present.");
   }
+  resumePendingDocuments().catch((error) => {
+    console.error('Failed to resume pending OCR documents on startup', error);
+  });
 });
