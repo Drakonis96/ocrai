@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { DocumentData, FileSystemItem, FolderData } from '../types';
 import {
   CheckCircleIcon,
@@ -133,12 +133,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     setIsCreatingFolder(false);
   };
 
-  const handleCopyTitle = (event: React.MouseEvent, id: string, name: string) => {
+  const handleCopyTitle = useCallback((event: React.MouseEvent, id: string, name: string) => {
     event.stopPropagation();
     navigator.clipboard.writeText(name);
     setCopyFeedbackId(id);
     setTimeout(() => setCopyFeedbackId(null), 1000);
-  };
+  }, []);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -158,21 +158,21 @@ const Dashboard: React.FC<DashboardProps> = ({
     return sortDirection === 'asc' ? '^' : 'v';
   };
 
-  const handleDragStart = (event: React.DragEvent, id: string) => {
+  const handleDragStart = useCallback((event: React.DragEvent, id: string) => {
     event.dataTransfer.setData('text/plain', id);
-  };
+  }, []);
 
-  const handleDragOver = (event: React.DragEvent) => {
+  const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-  };
+  }, []);
 
-  const handleDropOnFolder = (event: React.DragEvent, targetFolderId: string) => {
+  const handleDropOnFolder = useCallback((event: React.DragEvent, targetFolderId: string) => {
     event.preventDefault();
     const id = event.dataTransfer.getData('text/plain');
     if (id && id !== targetFolderId) {
       onMoveItem(id, targetFolderId);
     }
-  };
+  }, [onMoveItem]);
 
   const handleDropOnBreadcrumb = (event: React.DragEvent, targetFolderId: string | null) => {
     event.preventDefault();
@@ -372,7 +372,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <DesktopRow
                       key={item.id}
                       item={item}
-                      copyFeedbackId={copyFeedbackId}
+                      isCopyFeedbackVisible={copyFeedbackId === item.id}
                       onCopyTitle={handleCopyTitle}
                       onDeleteItem={onDeleteItem}
                       onDragStart={handleDragStart}
@@ -391,7 +391,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <MobileCard
                   key={item.id}
                   item={item}
-                  copyFeedbackId={copyFeedbackId}
+                  isCopyFeedbackVisible={copyFeedbackId === item.id}
                   onCopyTitle={handleCopyTitle}
                   onDeleteItem={onDeleteItem}
                   onDragStart={handleDragStart}
@@ -411,7 +411,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
 interface SharedItemProps {
   item: FileSystemItem;
-  copyFeedbackId: string | null;
+  isCopyFeedbackVisible: boolean;
   onCopyTitle: (event: React.MouseEvent, id: string, name: string) => void;
   onDeleteItem: (itemId: string) => void;
   onDragStart: (event: React.DragEvent, id: string) => void;
@@ -421,9 +421,9 @@ interface SharedItemProps {
   handleDragOver: (event: React.DragEvent) => void;
 }
 
-const DesktopRow: React.FC<SharedItemProps> = ({
+const DesktopRow: React.FC<SharedItemProps> = memo(({
   item,
-  copyFeedbackId,
+  isCopyFeedbackVisible,
   onCopyTitle,
   onDeleteItem,
   onDragStart,
@@ -500,7 +500,7 @@ const DesktopRow: React.FC<SharedItemProps> = ({
                 >
                   <CopyIcon className="h-3.5 w-3.5" />
                 </button>
-                {copyFeedbackId === doc.id && (
+                {isCopyFeedbackVisible && (
                   <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] font-medium text-white shadow-lg dark:bg-slate-200 dark:text-slate-900">
                     Title copied
                   </span>
@@ -541,11 +541,14 @@ const DesktopRow: React.FC<SharedItemProps> = ({
       </td>
     </tr>
   );
-};
+}, (previousProps, nextProps) => (
+  previousProps.item === nextProps.item
+  && previousProps.isCopyFeedbackVisible === nextProps.isCopyFeedbackVisible
+));
 
-const MobileCard: React.FC<SharedItemProps> = ({
+const MobileCard: React.FC<SharedItemProps> = memo(({
   item,
-  copyFeedbackId,
+  isCopyFeedbackVisible,
   onCopyTitle,
   onDeleteItem,
   onDragStart,
@@ -625,7 +628,7 @@ const MobileCard: React.FC<SharedItemProps> = ({
                   >
                     <CopyIcon className="h-3.5 w-3.5" />
                   </button>
-                  {copyFeedbackId === doc.id && (
+                  {isCopyFeedbackVisible && (
                     <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-[10px] font-medium text-white shadow-lg dark:bg-slate-200 dark:text-slate-900">
                       Title copied
                     </span>
@@ -663,9 +666,12 @@ const MobileCard: React.FC<SharedItemProps> = ({
       </div>
     </div>
   );
-};
+}, (previousProps, nextProps) => (
+  previousProps.item === nextProps.item
+  && previousProps.isCopyFeedbackVisible === nextProps.isCopyFeedbackVisible
+));
 
-const StatusWithProgress = ({
+const StatusWithProgress = memo(({
   status,
   processed,
   total,
@@ -706,6 +712,6 @@ const StatusWithProgress = ({
       </div>
     </div>
   );
-};
+});
 
 export default Dashboard;

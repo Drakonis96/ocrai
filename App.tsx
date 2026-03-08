@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useRef, useState } from 'react';
 import { Login } from './components/Login';
 import UploadView from './components/UploadView';
 import Dashboard from './components/Dashboard';
@@ -37,6 +37,35 @@ if (hasRealPdfWorkerSupport) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 }
 
+const areItemsEqual = (left: FileSystemItem, right: FileSystemItem) =>
+  JSON.stringify(left) === JSON.stringify(right);
+
+const reconcileItems = (currentItems: FileSystemItem[], nextItems: FileSystemItem[]) => {
+  const currentItemsById = new Map(currentItems.map((item) => [item.id, item]));
+  let hasChanges = currentItems.length !== nextItems.length;
+
+  const reconciledItems = nextItems.map((nextItem, index) => {
+    const currentItem = currentItemsById.get(nextItem.id);
+    if (!currentItem) {
+      hasChanges = true;
+      return nextItem;
+    }
+
+    if (currentItems[index]?.id !== nextItem.id) {
+      hasChanges = true;
+    }
+
+    if (areItemsEqual(currentItem, nextItem)) {
+      return currentItem;
+    }
+
+    hasChanges = true;
+    return nextItem;
+  });
+
+  return hasChanges ? reconciledItems : currentItems;
+};
+
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
   const [items, setItems] = useState<FileSystemItem[]>([]);
@@ -63,16 +92,24 @@ const App: React.FC = () => {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>('models');
   const [models, setModels] = useState<GeminiModel[]>(DEFAULT_MODELS);
   const [prompts, setPrompts] = useState<PromptPreset[]>([]);
+  const itemsRef = useRef<FileSystemItem[]>([]);
 
-  const loadItems = async () => {
+  const loadItems = async ({ showLoading = false, preserveUnchanged = false }: { showLoading?: boolean; preserveUnchanged?: boolean } = {}) => {
     try {
-      setIsLoadingItems(true);
+      if (showLoading) {
+        setIsLoadingItems(true);
+      }
+
       const data = await getAllItems();
-      setItems(data);
+      startTransition(() => {
+        setItems((currentItems) => (preserveUnchanged ? reconcileItems(currentItems, data) : data));
+      });
     } catch (error) {
       console.error('Failed to load items from DB', error);
     } finally {
-      setIsLoadingItems(false);
+      if (showLoading) {
+        setIsLoadingItems(false);
+      }
     }
   };
 
@@ -117,9 +154,13 @@ const App: React.FC = () => {
       return;
     }
 
-    loadItems();
+    loadItems({ showLoading: true });
     loadSettings();
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -137,7 +178,7 @@ const App: React.FC = () => {
 
     if (processingItems.length > 0) {
       const timer = setTimeout(async () => {
-        await loadItems();
+        await loadItems({ preserveUnchanged: true });
       }, 3000);
 
       return () => clearTimeout(timer);
@@ -235,7 +276,7 @@ const App: React.FC = () => {
     return images;
   };
 
-  const handleCreateFolder = async (name: string) => {
+  const handleCreateFolder = useCallback(async (name: string) => {
     const newFolder: FolderData = {
       id: `folder_${Date.now()}`,
       name,
@@ -246,11 +287,11 @@ const App: React.FC = () => {
 
     await saveItem(newFolder);
     setItems((current) => [...current, newFolder]);
-  };
+  }, [currentFolderId]);
 
-  const handleRequestDelete = (itemId: string) => {
+  const handleRequestDelete = useCallback((itemId: string) => {
     setItemToDelete(itemId);
-  };
+  }, []);
 
   const executeDeleteItem = async () => {
     if (!itemToDelete) {
@@ -285,12 +326,12 @@ const App: React.FC = () => {
     }
   };
 
-  const handleMoveItem = async (itemId: string, targetFolderId: string | null) => {
+  const handleMoveItem = useCallback(async (itemId: string, targetFolderId: string | null) => {
     if (itemId === targetFolderId) {
       return;
     }
 
-    const item = items.find((entry) => entry.id === itemId);
+    const item = itemsRef.current.find((entry) => entry.id === itemId);
     if (!item) {
       return;
     }
@@ -298,7 +339,7 @@ const App: React.FC = () => {
     const updatedItem = { ...item, parentId: targetFolderId };
     await saveItem(updatedItem);
     setItems((current) => current.map((entry) => (entry.id === itemId ? updatedItem : entry)));
-  };
+  }, []);
 
   const handleDeleteAll = async () => {
     await nukeDB(!deleteIncludeFolders);
@@ -388,10 +429,14 @@ const App: React.FC = () => {
     }
   };
 
-  const handleOpenDocument = (docId: string) => {
+  const handleOpenDocument = useCallback((docId: string) => {
     setActiveDocId(docId);
     setCurrentView(AppView.EDITOR);
-  };
+  }, []);
+
+  const handleNewUpload = useCallback(() => {
+    setCurrentView(AppView.UPLOAD);
+  }, []);
 
   const handleSaveDocument = async (docId: string, newText: string, pageSavedTexts?: Record<number, string>) => {
     const item = items.find((entry) => entry.id === docId);
@@ -517,7 +562,7 @@ const App: React.FC = () => {
                 items={items}
                 currentFolderId={currentFolderId}
                 onOpenDocument={handleOpenDocument}
-                onNewUpload={() => setCurrentView(AppView.UPLOAD)}
+                onNewUpload={handleNewUpload}
                 onCreateFolder={handleCreateFolder}
                 onNavigateFolder={setCurrentFolderId}
                 onDeleteItem={handleRequestDelete}
