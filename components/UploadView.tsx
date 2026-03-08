@@ -27,6 +27,7 @@ const UploadView: React.FC<UploadViewProps> = ({
     targetLanguage: 'Español',
     customPrompt: '',
     removeReferences: true,
+    pagesPerBatch: 1,
   });
 
   useEffect(() => {
@@ -210,6 +211,7 @@ const UploadView: React.FC<UploadViewProps> = ({
                 models={models}
                 prompts={prompts}
                 onOpenSettings={onOpenSettings}
+                showBatchSizeOption
               />
             </div>
           </section>

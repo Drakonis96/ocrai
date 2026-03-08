@@ -353,6 +353,7 @@ const App: React.FC = () => {
           targetLanguage: options.targetLanguage,
           customPrompt: options.customPrompt,
           removeReferences: options.removeReferences,
+          pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
           totalPages: images.length,
           processedPages: 0,
           pages: images.map((image, index) => ({
@@ -415,39 +416,19 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen w-screen flex-col bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-900 dark:text-slate-100">
       <nav className="shrink-0 border-b border-slate-200 bg-white shadow-sm transition-colors duration-200 dark:border-slate-700 dark:bg-slate-800">
-        <div className="flex flex-col gap-3 px-4 py-3 sm:px-6">
-          <div className="flex items-center justify-between gap-4">
-            <button className="flex items-center gap-3 text-left" onClick={goToHome}>
-              <img src="/logo.png" alt="ocrAI logo" className="h-10 w-10 rounded-2xl shadow-sm" />
-              <div>
-                <span className="block text-xl font-bold tracking-tight text-slate-800 dark:text-white">ocrAI</span>
-                <span className="block text-xs uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
-                  Workspace
-                </span>
-              </div>
-            </button>
-
-            <div
-              onClick={toggleTheme}
-              className="relative flex h-11 w-16 cursor-pointer items-center rounded-full bg-slate-200 p-1 transition-colors duration-300 dark:bg-slate-700"
-              title="Toggle dark mode"
-            >
-              <div
-                className={`flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-md transition-transform duration-300 dark:bg-slate-200 ${
-                  isDarkMode ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              >
-                {isDarkMode ? (
-                  <MoonIcon className="h-4 w-4 text-slate-800" />
-                ) : (
-                  <SunIcon className="h-4 w-4 text-orange-500" />
-                )}
-              </div>
+        <div className="grid gap-3 px-4 py-3 sm:px-6 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+          <button className="flex items-center gap-3 text-left lg:justify-self-start" onClick={goToHome}>
+            <img src="/logo.png" alt="ocrAI logo" className="h-10 w-10 rounded-2xl shadow-sm" />
+            <div>
+              <span className="block text-xl font-bold tracking-tight text-slate-800 dark:text-white">ocrAI</span>
+              <span className="block text-xs uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
+                Workspace
+              </span>
             </div>
-          </div>
+          </button>
 
-          <div className="overflow-x-auto">
-            <div className="flex min-w-max items-center gap-2 pb-1">
+          <div className="overflow-x-auto lg:justify-self-center lg:overflow-visible">
+            <div className="flex min-w-max items-center justify-center gap-2 pb-1 lg:min-w-0 lg:pb-0">
               <IconActionButton
                 icon={<SettingsIcon className="h-4 w-4" />}
                 label="Settings"
@@ -480,6 +461,26 @@ const App: React.FC = () => {
               />
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="relative ml-auto flex h-11 w-16 items-center rounded-full bg-slate-200 p-1 transition-colors duration-300 dark:bg-slate-700 lg:justify-self-end"
+            title="Toggle dark mode"
+            aria-label="Toggle dark mode"
+          >
+            <div
+              className={`flex h-9 w-9 items-center justify-center rounded-full bg-white shadow-md transition-transform duration-300 dark:bg-slate-200 ${
+                isDarkMode ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            >
+              {isDarkMode ? (
+                <MoonIcon className="h-4 w-4 text-slate-800" />
+              ) : (
+                <SunIcon className="h-4 w-4 text-orange-500" />
+              )}
+            </div>
+          </button>
         </div>
       </nav>
 

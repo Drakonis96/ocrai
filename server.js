@@ -38,6 +38,7 @@ const CONFIGURED_CORS_ORIGINS = (process.env.CORS_ORIGIN || '')
   .filter(Boolean);
 const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const SAFE_FILE_BASENAME_PATTERN = /[^A-Za-z0-9._-]+/g;
+const DEFAULT_PAGES_PER_BATCH = 1;
 const ALLOWED_IMAGE_MIME_TYPES = new Map([
   ['image/jpeg', 'jpg'],
   ['image/jpg', 'jpg'],
@@ -92,6 +93,29 @@ const sanitizeDocumentBaseName = (value) => {
 const getImageExtensionForMimeType = (value) => {
   const mimeType = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return ALLOWED_IMAGE_MIME_TYPES.get(mimeType) || null;
+};
+
+const normalizePositiveInteger = (value, fallbackValue) => {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue)) {
+    return fallbackValue;
+  }
+
+  const normalizedValue = Math.trunc(parsedValue);
+  return normalizedValue > 0 ? normalizedValue : fallbackValue;
+};
+
+const getPagesPerBatch = (value) => normalizePositiveInteger(value, DEFAULT_PAGES_PER_BATCH);
+const getPageNumber = (page, fallbackValue) => normalizePositiveInteger(page?.pageNumber, fallbackValue);
+
+const getProcessedPageCount = (pages = []) => pages.filter((page) => (
+  page?.status === 'completed' || page?.status === 'error'
+)).length;
+
+const findPageIndexByNumber = (pages, pageNumber, fallbackIndex) => {
+  const targetPageNumber = normalizePositiveInteger(pageNumber, fallbackIndex + 1);
+  const pageIndex = pages.findIndex((page, index) => getPageNumber(page, index + 1) === targetPageNumber);
+  return pageIndex >= 0 ? pageIndex : fallbackIndex;
 };
 
 app.disable('x-powered-by');
@@ -630,70 +654,108 @@ async function processDocumentBackground(docId) {
         activeProcessing.delete(docId);
         return;
     }
+
+    docData.pages = Array.isArray(docData.pages) ? docData.pages : [];
+    docData.pages.forEach((page, index) => {
+      page.pageNumber = getPageNumber(page, index + 1);
+    });
+    docData.pagesPerBatch = getPagesPerBatch(docData.pagesPerBatch);
+    docData.processedPages = getProcessedPageCount(docData.pages);
+
+    // Serialize metadata writes so concurrent page completions do not overwrite each other.
+    let metadataWriteQueue = Promise.resolve();
+    const persistMetadata = async () => {
+      metadataWriteQueue = metadataWriteQueue
+        .catch(() => {})
+        .then(() => fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2)));
+      await metadataWriteQueue;
+    };
     
     // Update status to processing if not already
     if (docData.status !== 'processing') {
         docData.status = 'processing';
-        await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
     }
+    await persistMetadata();
 
-    for (let i = 0; i < docData.pages.length; i++) {
-      // Re-read metadata to check for cancellation or updates (optional, but good practice)
-      // For now, we just process sequentially
-      
-      const page = docData.pages[i];
-      
-      if (page.status === 'completed') continue;
+    const pagesToProcess = docData.pages
+      .map((page, index) => ({
+        pageIndex: index,
+        pageNumber: getPageNumber(page, index + 1),
+      }))
+      .filter(({ pageIndex }) => docData.pages[pageIndex]?.status !== 'completed');
 
-      console.log(`Processing page ${i + 1}/${docData.pages.length} for ${docId}`);
+    for (let batchStart = 0; batchStart < pagesToProcess.length; batchStart += docData.pagesPerBatch) {
+      const batch = pagesToProcess.slice(batchStart, batchStart + docData.pagesPerBatch);
 
-      try {
-        // Read image file
-        const filename = path.basename(page.imageUrl);
-        const imagePath = path.join(docDir, filename);
-        
-        if (!fs.existsSync(imagePath)) {
-            throw new Error(`Image file not found: ${imagePath}`);
+      batch.forEach(({ pageIndex }) => {
+        if (docData.pages[pageIndex] && docData.pages[pageIndex].status !== 'completed') {
+          docData.pages[pageIndex].status = 'processing';
+        }
+      });
+      await persistMetadata();
+
+      await Promise.all(batch.map(async ({ pageIndex, pageNumber }) => {
+        const resolvedPageIndex = findPageIndexByNumber(docData.pages, pageNumber, pageIndex);
+        const page = docData.pages[resolvedPageIndex];
+
+        if (!page) {
+          return;
         }
 
-        const imageBuffer = await fs.promises.readFile(imagePath);
-        const base64Image = imageBuffer.toString('base64');
-        const mimeType = path.extname(filename) === '.png' ? 'image/png' : 'image/jpeg';
+        console.log(`Processing page ${pageNumber}/${docData.pages.length} for ${docId}`);
 
-        const blocks = await processPageWithGemini(
-          base64Image, 
-          mimeType, 
-          docData.modelUsed,
-          docData.processingMode,
-          docData.targetLanguage,
-          docData.customPrompt,
-          docData.removeReferences !== false
-        );
+        try {
+          const filename = path.basename(page.imageUrl);
+          const imagePath = path.join(docDir, filename);
+          
+          if (!fs.existsSync(imagePath)) {
+              throw new Error(`Image file not found: ${imagePath}`);
+          }
 
-        // Update page data in memory
-        docData.pages[i].blocks = blocks;
-        docData.pages[i].status = 'completed';
-        docData.processedPages = i + 1;
+          const imageBuffer = await fs.promises.readFile(imagePath);
+          const base64Image = imageBuffer.toString('base64');
+          const mimeType = path.extname(filename) === '.png' ? 'image/png' : 'image/jpeg';
 
-        // Save Markdown
-        const mdContent = blocksToMarkdown(blocks);
-        await fs.promises.writeFile(path.join(docDir, `page_${i + 1}.md`), mdContent);
+          const blocks = await processPageWithGemini(
+            base64Image,
+            mimeType,
+            docData.modelUsed,
+            docData.processingMode,
+            docData.targetLanguage,
+            docData.customPrompt,
+            docData.removeReferences !== false
+          );
 
-        // Save Metadata (incremental update)
-        await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+          const targetPageIndex = findPageIndexByNumber(docData.pages, pageNumber, resolvedPageIndex);
+          const targetPage = docData.pages[targetPageIndex];
+          if (!targetPage) {
+            throw new Error(`Page ${pageNumber} not found in metadata.`);
+          }
 
-      } catch (err) {
-        console.error(`Error processing page ${i + 1} of ${docId}:`, err);
-        docData.pages[i].status = 'error';
-        docData.processedPages = i + 1; 
-        await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
-      }
+          targetPage.blocks = blocks;
+          targetPage.status = 'completed';
+          docData.processedPages = getProcessedPageCount(docData.pages);
+
+          const mdContent = blocksToMarkdown(blocks);
+          await fs.promises.writeFile(path.join(docDir, `page_${pageNumber}.md`), mdContent);
+          await persistMetadata();
+        } catch (err) {
+          console.error(`Error processing page ${pageNumber} of ${docId}:`, err);
+          const targetPageIndex = findPageIndexByNumber(docData.pages, pageNumber, resolvedPageIndex);
+          if (docData.pages[targetPageIndex]) {
+            docData.pages[targetPageIndex].status = 'error';
+          }
+          docData.processedPages = getProcessedPageCount(docData.pages);
+          await persistMetadata();
+        }
+      }));
     }
 
     // Final status update
-    const allFailed = docData.pages.every(p => p.status === 'error');
+    docData.processedPages = getProcessedPageCount(docData.pages);
+    const allFailed = docData.pages.length > 0 && docData.pages.every(p => p.status === 'error');
     docData.status = allFailed ? 'error' : 'ready';
-    await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+    await persistMetadata();
     console.log(`Finished background processing for ${docId}`);
 
   } catch (e) {
@@ -911,8 +973,11 @@ app.post('/api/documents', async (req, res) => {
 
     // Handle image saving for files
     if (item.type === 'file' && item.pages && Array.isArray(item.pages)) {
+      item.pagesPerBatch = getPagesPerBatch(item.pagesPerBatch);
       for (let i = 0; i < item.pages.length; i++) {
         const page = item.pages[i];
+        const pageNumber = getPageNumber(page, i + 1);
+        item.pages[i].pageNumber = pageNumber;
         
         // If imageUrl is base64, save it to file and update URL
         if (page.imageUrl && page.imageUrl.startsWith('data:')) {
@@ -924,7 +989,7 @@ app.post('/api/documents', async (req, res) => {
             if (!extension) {
               throw createPublicError(400, 'Unsupported page image type');
             }
-            const filename = `page_${i + 1}.${extension}`;
+            const filename = `page_${pageNumber}.${extension}`;
             const filePath = path.join(docDir, filename);
             
             await fs.promises.writeFile(filePath, Buffer.from(base64Data, 'base64'));
@@ -940,11 +1005,13 @@ app.post('/api/documents', async (req, res) => {
         if (page.status === 'completed' && page.blocks) {
           const mdContent = blocksToMarkdown(page.blocks);
           await fs.promises.writeFile(
-            path.join(docDir, `page_${i + 1}.md`),
+            path.join(docDir, `page_${pageNumber}.md`),
             mdContent
           );
         }
       }
+
+      item.processedPages = getProcessedPageCount(item.pages);
     }
 
     // Save the full edited text to a markdown file if savedText exists

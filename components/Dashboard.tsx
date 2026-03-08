@@ -182,11 +182,13 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  const breadcrumbs = getBreadcrumbs();
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8">
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-center gap-2 overflow-x-auto text-sm text-slate-600 dark:text-slate-400 sm:text-base">
+        <div className="mb-6 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(18rem,26rem)_auto] lg:items-center">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-400 sm:text-base">
             <button
               onClick={() => onNavigateFolder(null)}
               onDragOver={handleDragOver}
@@ -200,13 +202,14 @@ const Dashboard: React.FC<DashboardProps> = ({
               <HomeIcon className="h-4 w-4" />
             </button>
 
-            {getBreadcrumbs().map((folder) => (
+            {breadcrumbs.map((folder) => (
               <React.Fragment key={folder.id}>
                 <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-600" />
                 <button
                   onClick={() => onNavigateFolder(folder.id)}
                   onDragOver={handleDragOver}
                   onDrop={(event) => handleDropOnBreadcrumb(event, folder.id)}
+                  title={folder.name}
                   className={`whitespace-nowrap rounded-full px-3 py-2 transition-colors ${
                     currentFolderId === folder.id
                       ? 'bg-slate-200 font-semibold text-slate-900 dark:bg-slate-700 dark:text-white'
@@ -219,7 +222,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             ))}
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2 lg:justify-self-center">
             <IconActionButton
               icon={<FolderIcon className="h-4 w-4" />}
               label="New folder"
@@ -234,16 +237,14 @@ const Dashboard: React.FC<DashboardProps> = ({
               onClick={onNewUpload}
             />
           </div>
-        </div>
 
-        <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative w-full max-w-xl">
+          <div className="relative w-full lg:min-w-[18rem] lg:max-w-[26rem]">
             <input
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search documents by name"
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 pr-24 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              className="h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 pr-24 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             {searchQuery && (
               <button
@@ -255,7 +256,8 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             )}
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
+
+          <p className="text-sm text-slate-500 dark:text-slate-400 lg:justify-self-end">
             {sortedVisibleItems.length} result{sortedVisibleItems.length === 1 ? '' : 's'}
           </p>
         </div>
@@ -321,7 +323,13 @@ const Dashboard: React.FC<DashboardProps> = ({
         ) : (
           <>
             <div className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800 md:block">
-              <table className="w-full text-left">
+              <table className="w-full table-fixed text-left">
+                <colgroup>
+                  <col />
+                  <col className="w-[8.5rem] lg:w-[10rem]" />
+                  <col className="w-[11rem] lg:w-[14rem]" />
+                  <col className="w-[9rem] lg:w-[10rem]" />
+                </colgroup>
                 <thead className="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50">
                   <tr>
                     <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
@@ -437,11 +445,13 @@ const DesktopRow: React.FC<SharedItemProps> = ({
         onClick={() => onNavigateFolder(folder.id)}
       >
         <td className="px-6 py-4">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="rounded-2xl bg-blue-50 p-2 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400">
               <FolderIcon className="h-5 w-5" />
             </div>
-            <span className="font-medium text-slate-700 dark:text-slate-200">{folder.name}</span>
+            <span title={folder.name} className="truncate font-medium text-slate-700 dark:text-slate-200">
+              {folder.name}
+            </span>
           </div>
         </td>
         <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
@@ -473,14 +483,16 @@ const DesktopRow: React.FC<SharedItemProps> = ({
       className="group transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
     >
       <td className="px-6 py-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <div className="rounded-2xl bg-slate-100 p-2 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
             <FileIcon className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="truncate font-medium text-slate-700 dark:text-slate-200">{doc.name}</span>
-              <div className="relative flex items-center">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span title={doc.name} className="min-w-0 flex-1 truncate font-medium text-slate-700 dark:text-slate-200">
+                {doc.name}
+              </span>
+              <div className="relative flex shrink-0 items-center">
                 <button
                   onClick={(event) => onCopyTitle(event, doc.id, doc.name)}
                   className="rounded-md p-1.5 text-slate-400 opacity-0 transition-colors group-hover:opacity-100 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-700 dark:hover:text-blue-400"
@@ -501,7 +513,7 @@ const DesktopRow: React.FC<SharedItemProps> = ({
       <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400">
         {new Date(doc.uploadDate).toLocaleDateString()}
       </td>
-      <td className="px-6 py-4 w-1/4">
+      <td className="px-6 py-4">
         <StatusWithProgress status={doc.status} processed={doc.processedPages} total={doc.totalPages} />
       </td>
       <td className="px-6 py-4">
@@ -560,8 +572,10 @@ const MobileCard: React.FC<SharedItemProps> = ({
               <div className="rounded-2xl bg-blue-50 p-3 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400">
                 <FolderIcon className="h-5 w-5" />
               </div>
-              <div>
-                <p className="truncate font-semibold text-slate-900 dark:text-white">{folder.name}</p>
+              <div className="min-w-0">
+                <p title={folder.name} className="truncate font-semibold text-slate-900 dark:text-white">
+                  {folder.name}
+                </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Created {new Date(folder.createdAt).toLocaleDateString()}
                 </p>
@@ -599,9 +613,11 @@ const MobileCard: React.FC<SharedItemProps> = ({
               <FileIcon className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <p className="truncate font-semibold text-slate-900 dark:text-white">{doc.name}</p>
-                <div className="relative">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <p title={doc.name} className="min-w-0 flex-1 truncate font-semibold text-slate-900 dark:text-white">
+                  {doc.name}
+                </p>
+                <div className="relative shrink-0">
                   <button
                     onClick={(event) => onCopyTitle(event, doc.id, doc.name)}
                     className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-700 dark:hover:text-blue-400"
