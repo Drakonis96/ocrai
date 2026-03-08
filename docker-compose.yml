@@ -1,0 +1,25 @@
+services:
+  redis:
+    image: redis:alpine
+    restart: always
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+
+  ocrai2:
+    build: .
+    ports:
+      - "127.0.0.1:5039:5037"
+    volumes:
+      - ./data:/app/data
+      - ./.env.local:/app/.env.local
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+volumes:
+  redis_data:
