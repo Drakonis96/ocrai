@@ -25,6 +25,7 @@ import { MOCK_ID_PREFIX } from './constants';
 import { addModel, DEFAULT_MODELS, GeminiModel, getModels, removeModel } from './utils/modelStorage';
 import { createPrompt, deletePrompt, getPrompts, updatePrompt } from './services/promptService';
 import { getPdfRenderConcurrency } from './utils/pdfProcessing';
+import { downloadBlob } from './utils/download';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
@@ -96,7 +97,9 @@ const App: React.FC = () => {
   const [prompts, setPrompts] = useState<PromptPreset[]>([]);
   const itemsRef = useRef<FileSystemItem[]>([]);
 
-  const loadItems = async ({ showLoading = false, preserveUnchanged = false }: { showLoading?: boolean; preserveUnchanged?: boolean } = {}) => {
+  const loadItems = useCallback(async (
+    { showLoading = false, preserveUnchanged = false }: { showLoading?: boolean; preserveUnchanged?: boolean } = {}
+  ) => {
     try {
       if (showLoading) {
         setIsLoadingItems(true);
@@ -113,9 +116,9 @@ const App: React.FC = () => {
         setIsLoadingItems(false);
       }
     }
-  };
+  }, []);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       const [availableModels, savedPrompts] = await Promise.all([getModels(), getPrompts()]);
       setModels(availableModels);
@@ -125,7 +128,7 @@ const App: React.FC = () => {
       setModels(DEFAULT_MODELS);
       setPrompts([]);
     }
-  };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -175,17 +178,21 @@ const App: React.FC = () => {
     }
   }, [isDarkMode]);
 
+  const hasProcessingItems = items.some(
+    (item) => item.type === 'file' && (item as DocumentData).status === 'processing'
+  );
+
   useEffect(() => {
-    const processingItems = items.filter((item) => item.type === 'file' && (item as DocumentData).status === 'processing');
-
-    if (processingItems.length > 0) {
-      const timer = setTimeout(async () => {
-        await loadItems({ preserveUnchanged: true });
-      }, 3000);
-
-      return () => clearTimeout(timer);
+    if (!hasProcessingItems) {
+      return;
     }
-  }, [items]);
+
+    const timer = window.setInterval(() => {
+      void loadItems({ preserveUnchanged: true });
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [hasProcessingItems, loadItems]);
 
   const handleLogout = async () => {
     try {
@@ -387,13 +394,7 @@ const App: React.FC = () => {
     });
 
     const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'all_notes.zip';
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
+    downloadBlob(content, 'all_notes.zip');
   };
 
   const handleFileSelect = async (fileList: FileList, options: ProcessingOptions) => {

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.1 - 2026-03-25
+
+### Fixed
+- Kept frontend progress polling alive while documents remain in `processing`, even when consecutive refreshes return identical metadata, so dashboard progress bars update without reloading the browser.
+- Reworked document downloads to use hidden off-screen anchors and preserved scroll position, preventing the export button from jumping the page, opening and closing erratically, or getting stuck in a frontend loop.
+- Hardened the editor export menu with outside-click detection based on element containment instead of brittle document click bubbling, reducing the chance of similar issues affecting other action buttons.
+
+### Testing
+- Added regression coverage for persistent processing polling and for the shared download helper used by frontend exports.
+
 ## v1.2.0 - 2026-03-25
 
 ### Added

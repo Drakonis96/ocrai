@@ -9,6 +9,7 @@ import {
   markdownToRichTextHtml,
   toEpubXhtml,
 } from './richText';
+import { downloadBlob } from './download';
 
 /**
  * Cleans the content of a text block:
@@ -224,9 +225,6 @@ export const downloadPDF = async (text: string, title: string, filename: string)
 
     await pdf.html(content as HTMLElement, {
       autoPaging: 'text',
-      callback: (doc) => {
-        doc.save(filename);
-      },
       html2canvas: {
         backgroundColor: '#ffffff',
         scale: 0.7,
@@ -237,6 +235,8 @@ export const downloadPDF = async (text: string, title: string, filename: string)
       x: 36,
       y: 36,
     });
+
+    downloadBlob(pdf.output('blob'), filename);
   } finally {
     document.body.removeChild(container);
   }

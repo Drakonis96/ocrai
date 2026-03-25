@@ -24,6 +24,7 @@ import ProcessingOptionsSelector from '../ProcessingOptionsSelector';
 import IconActionButton from '../IconActionButton';
 import { DEFAULT_MODELS, GeminiModel } from '../../utils/modelStorage';
 import { getIssuePageIndexes, getPageIssueType } from '../../utils/pageReview';
+import { downloadBlob } from '../../utils/download';
 
 interface EditorViewProps {
   doc: DocumentData;
@@ -52,6 +53,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   onOpenSettings,
 }) => {
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [workingDoc, setWorkingDoc] = useState(doc);
   const [activePage, setActivePage] = useState(0);
   const [cleanText, setCleanText] = useState('');
@@ -223,10 +225,19 @@ const EditorView: React.FC<EditorViewProps> = ({
       return;
     }
 
-    const handleDocumentClick = () => setIsExportMenuOpen(false);
-    document.addEventListener('click', handleDocumentClick);
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      if (
+        exportMenuRef.current
+        && event.target instanceof Node
+        && !exportMenuRef.current.contains(event.target)
+      ) {
+        setIsExportMenuOpen(false);
+      }
+    };
 
-    return () => document.removeEventListener('click', handleDocumentClick);
+    document.addEventListener('pointerdown', handleDocumentPointerDown);
+
+    return () => document.removeEventListener('pointerdown', handleDocumentPointerDown);
   }, [isExportMenuOpen]);
 
   const handleTextChange = (newText: string) => {
@@ -498,14 +509,7 @@ const EditorView: React.FC<EditorViewProps> = ({
       blob = generateMarkdown(fullText);
     }
 
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `${workingDoc.name.replace(/\.[^/.]+$/, '')}_clean.${extension}`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${workingDoc.name.replace(/\.[^/.]+$/, '')}_clean.${extension}`);
     setIsExportMenuOpen(false);
   };
 
@@ -793,7 +797,7 @@ const EditorView: React.FC<EditorViewProps> = ({
               onClick={handleSave}
             />
 
-            <div className="relative">
+            <div ref={exportMenuRef} className="relative">
               <IconActionButton
                 icon={<DownloadIcon className="h-4 w-4" />}
                 label="Export"
@@ -809,11 +813,11 @@ const EditorView: React.FC<EditorViewProps> = ({
                   className="absolute right-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <button onClick={() => handleDownload('md')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Markdown (.md)</button>
-                  <button onClick={() => handleDownload('pdf')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">PDF (.pdf)</button>
-                  <button onClick={() => handleDownload('epub')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">EPUB (.epub)</button>
-                  <button onClick={() => handleDownload('html')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">HTML (.html)</button>
-                  <button onClick={() => handleDownload('txt')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Plain text (.txt)</button>
+                  <button type="button" onClick={() => handleDownload('md')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Markdown (.md)</button>
+                  <button type="button" onClick={() => handleDownload('pdf')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">PDF (.pdf)</button>
+                  <button type="button" onClick={() => handleDownload('epub')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">EPUB (.epub)</button>
+                  <button type="button" onClick={() => handleDownload('html')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">HTML (.html)</button>
+                  <button type="button" onClick={() => handleDownload('txt')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Plain text (.txt)</button>
                 </div>
               )}
             </div>
