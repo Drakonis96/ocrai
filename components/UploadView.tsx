@@ -108,8 +108,8 @@ const UploadView: React.FC<UploadViewProps> = ({
   return (
     <div className="flex h-full min-h-0 flex-col transition-colors duration-200">
       <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-24 pt-5 sm:px-6 sm:pb-8 sm:pt-6">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)] lg:items-start">
-          <section className="rounded-[2rem] bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 px-6 py-8 text-white shadow-xl sm:px-8 sm:py-10">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)] lg:items-stretch">
+          <section className="h-full rounded-[2rem] bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 px-6 py-8 text-white shadow-xl sm:px-8 sm:py-10">
             <span className="inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/90">
               OCR Workspace
             </span>
@@ -196,7 +196,7 @@ const UploadView: React.FC<UploadViewProps> = ({
             )}
           </section>
 
-          <section className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-6">
+          <section className="h-full rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-6">
             <div>
               <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Processing settings</h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">

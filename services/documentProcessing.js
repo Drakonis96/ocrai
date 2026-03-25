@@ -148,6 +148,7 @@ const normalizePageState = (page, pageIndex, { resetInFlightProcessing = false }
     ...(page || {}),
     pageNumber: getPageNumber(page, pageIndex + 1),
     blocks: Array.isArray(page?.blocks) ? page.blocks : [],
+    blankPage: page?.blankPage === true,
     errorDismissed: page?.errorDismissed === true,
     retryCount: normalizeNonNegativeInteger(page?.retryCount, 0),
     lastError: typeof page?.lastError === 'string' ? page.lastError : '',
@@ -219,6 +220,17 @@ const readMetadataWithRetry = async (metadataPath, config, logger) => {
   }
 
   return null;
+};
+
+const normalizeProcessPageResult = (result) => {
+  if (Array.isArray(result)) {
+    return { blocks: result, blankPage: false };
+  }
+
+  return {
+    blocks: Array.isArray(result?.blocks) ? result.blocks : [],
+    blankPage: result?.blankPage === true,
+  };
 };
 
 export const createDocumentProcessingManager = ({
@@ -320,15 +332,19 @@ export const createDocumentProcessingManager = ({
         await persistMetadata();
 
         await Promise.all(batch.map(async ({ pageIndex, pageNumber }) => {
-          const page = docData.pages[pageIndex];
-          if (!page) {
+          if (!docData.pages[pageIndex]) {
             return;
           }
 
           logger.log(`Processing page ${pageNumber}/${docData.pages.length} for ${docId}`);
 
           try {
-            const filename = path.basename(page.imageUrl);
+            const currentPage = docData.pages[pageIndex];
+            if (!currentPage) {
+              return;
+            }
+
+            const filename = path.basename(currentPage.imageUrl);
             const imagePath = path.join(docDir, filename);
 
             if (!fs.existsSync(imagePath)) {
@@ -341,7 +357,7 @@ export const createDocumentProcessingManager = ({
             const base64Image = imageBuffer.toString('base64');
             const mimeType = path.extname(filename).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
 
-            const blocks = await processPage({
+            const result = await processPage({
               base64Image,
               mimeType,
               modelName: docData.modelUsed,
@@ -353,29 +369,41 @@ export const createDocumentProcessingManager = ({
               pageIndex,
               pageNumber,
             });
+            const { blocks, blankPage } = normalizeProcessPageResult(result);
 
-            page.blocks = Array.isArray(blocks) ? blocks : [];
-            page.status = 'completed';
-            page.errorDismissed = false;
-            page.retryCount = 0;
-            page.lastError = '';
-            page.nextRetryAt = null;
+            const latestPage = docData.pages[pageIndex];
+            if (!latestPage) {
+              return;
+            }
 
-            const mdContent = blocksToMarkdown(page.blocks);
+            latestPage.blocks = blocks;
+            latestPage.status = 'completed';
+            latestPage.blankPage = blankPage;
+            latestPage.errorDismissed = false;
+            latestPage.retryCount = 0;
+            latestPage.lastError = '';
+            latestPage.nextRetryAt = null;
+
+            const mdContent = blocksToMarkdown(latestPage.blocks);
             await fs.promises.writeFile(path.join(docDir, `page_${pageNumber}.md`), mdContent);
             await persistMetadata();
           } catch (error) {
             logger.error(`Error processing page ${pageNumber} of ${docId}:`, error);
-            page.lastError = formatProcessingError(error);
-            page.errorDismissed = false;
-            page.retryCount = normalizeNonNegativeInteger(page.retryCount, 0) + 1;
+            const latestPage = docData.pages[pageIndex];
+            if (!latestPage) {
+              return;
+            }
 
-            if (isRetryableProcessingError(error) && page.retryCount <= runtimeConfig.maxRetries) {
-              page.status = 'pending';
-              page.nextRetryAt = Date.now() + getRetryDelayMs(page.retryCount, runtimeConfig, error);
+            latestPage.lastError = formatProcessingError(error);
+            latestPage.errorDismissed = false;
+            latestPage.retryCount = normalizeNonNegativeInteger(latestPage.retryCount, 0) + 1;
+
+            if (isRetryableProcessingError(error) && latestPage.retryCount <= runtimeConfig.maxRetries) {
+              latestPage.status = 'pending';
+              latestPage.nextRetryAt = Date.now() + getRetryDelayMs(latestPage.retryCount, runtimeConfig, error);
             } else {
-              page.status = 'error';
-              page.nextRetryAt = null;
+              latestPage.status = 'error';
+              latestPage.nextRetryAt = null;
             }
 
             await persistMetadata();

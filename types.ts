@@ -27,6 +27,7 @@ export interface PageData {
   imageUrl: string; // Base64 data URL
   blocks: TextBlock[];
   status: 'pending' | 'processing' | 'completed' | 'error';
+  blankPage?: boolean;
   errorDismissed?: boolean;
   retryCount?: number;
   lastError?: string;

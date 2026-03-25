@@ -25,7 +25,12 @@ dist-ssr
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Testing
 coverage
 
+# Local documents and generated app data
+data/
+documento_prueba.pdf

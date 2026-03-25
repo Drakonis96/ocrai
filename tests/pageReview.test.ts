@@ -58,6 +58,18 @@ describe('page review helpers', () => {
     expect(pageHasTranscription(page, '  manual transcription  ')).toBe(true);
   });
 
+  it('does not flag known blank pages as issues', () => {
+    const doc = buildDocument([
+      buildPage({
+        blankPage: true,
+        blocks: [],
+      }),
+    ]);
+
+    expect(getPageIssueType(doc.pages[0])).toBe(null);
+    expect(getIssuePageIndexes(doc)).toEqual([]);
+  });
+
   it('ignores dismissed errors in issue navigation', () => {
     const doc = buildDocument([
       buildPage({

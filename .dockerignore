@@ -9,6 +9,8 @@ docker-compose.yml
 .env.*
 .DS_Store
 coverage
+data/
+documento_prueba.pdf
 .vscode
 .idea
 README.md

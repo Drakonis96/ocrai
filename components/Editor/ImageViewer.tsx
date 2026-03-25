@@ -37,6 +37,12 @@ const ImageViewer: React.FC<ImageViewerProps> = ({ page }) => {
             // Logic to potentially adjust scale based on container width could go here
           }}
         />
+
+        {page.blankPage && (
+          <div className="absolute left-3 top-3 rounded-full bg-slate-900/80 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white shadow-lg">
+            Blank page
+          </div>
+        )}
         
         {/* Render Bounding Boxes Overlay */}
         <div className="absolute inset-0 pointer-events-none">

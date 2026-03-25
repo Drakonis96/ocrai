@@ -19,10 +19,12 @@ import {
 } from './components/Icons';
 import { AppView, DocumentData, FileSystemItem, FolderData, ProcessingOptions, PromptPreset, SettingsTab } from './types';
 import { reconstructCleanText } from './utils/reconstruction';
+import { markdownToPlainText } from './utils/richText';
 import { deleteItem, getAllItems, nukeDB, saveItem } from './utils/storage';
 import { MOCK_ID_PREFIX } from './constants';
 import { addModel, DEFAULT_MODELS, GeminiModel, getModels, removeModel } from './utils/modelStorage';
 import { createPrompt, deletePrompt, getPrompts, updatePrompt } from './services/promptService';
+import { getPdfRenderConcurrency } from './utils/pdfProcessing';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore
@@ -246,7 +248,10 @@ const App: React.FC = () => {
     });
   };
 
-  const convertPdfToImages = async (file: File): Promise<{ data: string; mimeType: string }[]> => {
+  const convertPdfToImages = async (
+    file: File,
+    requestedConcurrency?: number
+  ): Promise<{ data: string; mimeType: string }[]> => {
     if (!hasRealPdfWorkerSupport) {
       throw new Error('This browser does not support Web Workers. PDF processing requires a real worker.');
     }
@@ -254,9 +259,10 @@ const App: React.FC = () => {
     const arrayBuffer = await file.arrayBuffer();
     const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     const pdf = await loadingTask.promise;
-    const images: { data: string; mimeType: string }[] = [];
+    const images: { data: string; mimeType: string }[] = new Array(pdf.numPages);
+    const renderConcurrency = Math.min(getPdfRenderConcurrency(requestedConcurrency), pdf.numPages);
 
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    const renderPage = async (pageNum: number) => {
       const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1.5 });
       const canvas = document.createElement('canvas');
@@ -264,14 +270,27 @@ const App: React.FC = () => {
       canvas.height = viewport.height;
       const context = canvas.getContext('2d');
       if (!context) {
-        continue;
+        throw new Error(`Failed to create a canvas context for page ${pageNum}`);
       }
 
       await page.render({ canvasContext: context, viewport } as any).promise;
-
       const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      images.push({ data: dataUrl.split(',')[1], mimeType: 'image/jpeg' });
-    }
+      images[pageNum - 1] = { data: dataUrl.split(',')[1], mimeType: 'image/jpeg' };
+    };
+
+    let nextPageNumber = 1;
+    await Promise.all(Array.from({ length: renderConcurrency }, async () => {
+      while (true) {
+        const pageNum = nextPageNumber;
+        nextPageNumber += 1;
+
+        if (pageNum > pdf.numPages) {
+          return;
+        }
+
+        await renderPage(pageNum);
+      }
+    }));
 
     return images;
   };
@@ -364,7 +383,7 @@ const App: React.FC = () => {
 
     docs.forEach((doc) => {
       const content = doc.savedText || reconstructCleanText(doc.pages);
-      zip.file(`${doc.name.replace(/\.[^/.]+$/, '')}.txt`, content);
+      zip.file(`${doc.name.replace(/\.[^/.]+$/, '')}.txt`, markdownToPlainText(content));
     });
 
     const content = await zip.generateAsync({ type: 'blob' });
@@ -388,7 +407,7 @@ const App: React.FC = () => {
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const isPdf = file.type === 'application/pdf';
         const images = isPdf
-          ? await convertPdfToImages(file)
+          ? await convertPdfToImages(file, options.pagesPerBatch)
           : [{ data: await fileToBase64(file), mimeType: file.type }];
 
         const newDoc: DocumentData = {

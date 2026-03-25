@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { DocumentData, BlockLabel, ProcessingOptions, PromptPreset, SettingsTab, TextBlock } from '../../types';
 import ImageViewer from './ImageViewer';
 import TextEditor from './TextEditor';
-import { reconstructCleanText, generateMarkdown, generateHTML, generateEPUB } from '../../utils/reconstruction';
+import { reconstructCleanText, downloadPDF, generateEPUB, generateHTML, generateMarkdown, generatePlainText } from '../../utils/reconstruction';
 import {
   AlertCircleIcon,
   ArrowLeftIcon,
@@ -469,8 +469,8 @@ const EditorView: React.FC<EditorViewProps> = ({
     await handleReprocessPages([activePage]);
   };
 
-  const handleDownload = async (format: 'md' | 'txt' | 'html' | 'epub') => {
-    let blob: Blob;
+  const handleDownload = async (format: 'md' | 'txt' | 'html' | 'epub' | 'pdf') => {
+    let blob: Blob | null = null;
     let extension = format;
 
     const fullText = showFullDocument
@@ -484,6 +484,16 @@ const EditorView: React.FC<EditorViewProps> = ({
     } else if (format === 'epub') {
       blob = await generateEPUB(fullText, workingDoc.name);
       extension = 'epub';
+    } else if (format === 'txt') {
+      blob = generatePlainText(fullText);
+    } else if (format === 'pdf') {
+      await downloadPDF(
+        fullText,
+        workingDoc.name,
+        `${workingDoc.name.replace(/\.[^/.]+$/, '')}_clean.pdf`
+      );
+      setIsExportMenuOpen(false);
+      return;
     } else {
       blob = generateMarkdown(fullText);
     }
@@ -800,6 +810,7 @@ const EditorView: React.FC<EditorViewProps> = ({
                   onClick={(event) => event.stopPropagation()}
                 >
                   <button onClick={() => handleDownload('md')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Markdown (.md)</button>
+                  <button onClick={() => handleDownload('pdf')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">PDF (.pdf)</button>
                   <button onClick={() => handleDownload('epub')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">EPUB (.epub)</button>
                   <button onClick={() => handleDownload('html')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">HTML (.html)</button>
                   <button onClick={() => handleDownload('txt')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Plain text (.txt)</button>

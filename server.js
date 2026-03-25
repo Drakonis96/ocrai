@@ -430,6 +430,7 @@ You are a highly advanced Document Layout Analysis AI. Your task is to perform O
 4.  **HYPHENATED WORDS ACROSS LINES**: If a word is cut at the end of a line with a hyphen and continues on the next line, do not transcribe the hyphen. Join both fragments into the complete word.
 
 **Task Steps**:
+0.  **Classify Blank Pages**: If the page is blank or only contains scanning artifacts, stains, or edge noise without readable content, set "blankPage" to true and return an empty "blocks" array.
 1.  **Extract Text**: Read all text in the image.
 2.  **Segment Blocks**: Group continuous text into paragraphs (MAIN_TEXT). Do not split a single paragraph into multiple blocks unless necessary (e.g., page break).
 3.  **Label Blocks**: Assign one of the following labels to each block:
@@ -444,6 +445,7 @@ You are a highly advanced Document Layout Analysis AI. Your task is to perform O
 **Output Format**:
 Return a valid JSON object with the following structure:
 {
+  "blankPage": false,
   "blocks": [
     {
       "text": "The content of the block...",
@@ -477,6 +479,7 @@ You are a highly advanced Document Layout Analysis AI. Your task is to perform O
     Do NOT include these references in the extracted text. Simply skip them entirely, ensuring the remaining text flows naturally.
 
 **Task Steps**:
+0.  **Classify Blank Pages**: If the page is blank or only contains scanning artifacts, stains, or edge noise without readable content, set "blankPage" to true and return an empty "blocks" array.
 1.  **Extract Text**: Read all text in the image.
 2.  **Segment Blocks**: Group continuous text into paragraphs (MAIN_TEXT). Do not split a single paragraph into multiple blocks unless necessary (e.g., page break).
 3.  **Label Blocks**: Assign one of the following labels to each block:
@@ -491,6 +494,7 @@ You are a highly advanced Document Layout Analysis AI. Your task is to perform O
 **Output Format**:
 Return a valid JSON object with the following structure:
 {
+  "blankPage": false,
   "blocks": [
     {
       "text": "The content of the block...",
@@ -532,6 +536,7 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
   const responseSchema = {
     type: Type.OBJECT,
     properties: {
+      blankPage: { type: Type.BOOLEAN },
       blocks: {
         type: Type.ARRAY,
         items: {
@@ -551,7 +556,8 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
           required: ["text", "label"]
         }
       }
-    }
+    },
+    required: ["blankPage", "blocks"]
   };
 
   let finalPrompt = removeReferences ? OCR_LAYOUT_PROMPT_NO_REFS : OCR_LAYOUT_PROMPT;
@@ -602,11 +608,18 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
   
   if (!textResponse) {
     console.warn("Gemini returned empty text response. Returning empty blocks.");
-    return [];
+    return { blankPage: false, blocks: [] };
   }
 
   try {
-    return JSON.parse(textResponse).blocks;
+    const parsedResponse = JSON.parse(textResponse);
+    const blankPage = parsedResponse?.blankPage === true;
+    const blocks = Array.isArray(parsedResponse?.blocks) ? parsedResponse.blocks : [];
+
+    return {
+      blankPage,
+      blocks: blankPage ? [] : blocks,
+    };
   } catch (e) {
     console.error('Failed to parse Gemini response.', {
       responseLength: textResponse.length,
@@ -682,7 +695,7 @@ app.post('/api/reprocess-page', async (req, res) => {
     console.log(`Calling Gemini for reprocessing... Model: ${modelName || 'default'}`);
 
     try {
-      const blocks = await processPageWithGemini(
+      const result = await processPageWithGemini(
         base64Image,
         mimeType,
         modelName,
@@ -691,11 +704,13 @@ app.post('/api/reprocess-page', async (req, res) => {
         customPrompt,
         removeReferences !== false
       );
+      const blocks = Array.isArray(result?.blocks) ? result.blocks : [];
 
       console.log(`Gemini reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
 
       docData.pages[parsedPageIndex].blocks = blocks;
       docData.pages[parsedPageIndex].status = 'completed';
+      docData.pages[parsedPageIndex].blankPage = result?.blankPage === true;
       docData.pages[parsedPageIndex].errorDismissed = false;
       docData.pages[parsedPageIndex].retryCount = 0;
       docData.pages[parsedPageIndex].lastError = '';
@@ -708,7 +723,7 @@ app.post('/api/reprocess-page', async (req, res) => {
       normalizeDocumentRuntimeState(docData);
       await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
 
-      res.json({ blocks });
+      res.json({ blocks, blankPage: result?.blankPage === true });
     } catch (error) {
       docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
       docData.pages[parsedPageIndex].lastError = formatProcessingError(error);
@@ -739,7 +754,8 @@ app.post('/api/process-page', async (req, res) => {
       throw createPublicError(400, 'Unsupported image type');
     }
 
-    const blocks = await processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences !== false);
+    const result = await processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences !== false);
+    const blocks = Array.isArray(result?.blocks) ? result.blocks : [];
     
     // Try to save to Markdown file (legacy logic, kept for compatibility if needed)
     try {
@@ -754,7 +770,7 @@ app.post('/api/process-page', async (req, res) => {
       console.error("Error saving markdown file:", saveError);
     }
 
-    res.json({ text: JSON.stringify({ blocks }) }); // Maintain old response format for now
+    res.json({ text: JSON.stringify({ blocks, blankPage: result?.blankPage === true }) }); // Maintain old response format for now
 
   } catch (error) {
     handleRouteError(res, 'Gemini API error', error, 'Failed to process page');

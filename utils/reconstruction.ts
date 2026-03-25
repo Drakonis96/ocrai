@@ -1,6 +1,14 @@
 import { PageData, BlockLabel } from "../types";
 // @ts-ignore
 import JSZip from 'jszip';
+import { jsPDF } from 'jspdf';
+import {
+  extractHeadingsFromRichHtml,
+  generateRichHtmlDocument,
+  markdownToPlainText,
+  markdownToRichTextHtml,
+  toEpubXhtml,
+} from './richText';
 
 /**
  * Cleans the content of a text block:
@@ -88,59 +96,19 @@ export const generateMarkdown = (text: string): Blob => {
   return new Blob([text], { type: 'text/markdown' });
 };
 
-export const generateHTML = (text: string, title: string): Blob => {
-  // Parse markdown-like structure to HTML tags to avoid "all bold" issues
-  // and ensure valid HTML structure.
-  const paragraphs = text.split('\n\n');
-  const htmlBody = paragraphs.map(p => {
-    const trimmed = p.trim();
-    if (!trimmed) return '';
-    
-    // Check for headers (indicated by # in our reconstruction)
-    if (trimmed.startsWith('# ')) {
-      return `<h2>${trimmed.replace('# ', '')}</h2>`;
-    }
-    // Regular paragraphs
-    return `<p>${trimmed}</p>`;
-  }).join('\n');
+export const generatePlainText = (text: string): Blob => {
+  return new Blob([markdownToPlainText(text)], { type: 'text/plain;charset=utf-8' });
+};
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <title>${title}</title>
-      <style>
-        body { 
-          font-family: Georgia, serif; 
-          line-height: 1.6; 
-          max-width: 800px; 
-          margin: 0 auto; 
-          padding: 40px; 
-          color: #333;
-        }
-        p { 
-          margin-bottom: 1em; 
-          font-weight: normal; 
-        }
-        h2 { 
-          margin-top: 2em; 
-          margin-bottom: 1em; 
-          font-weight: bold; 
-          color: #111;
-        }
-      </style>
-    </head>
-    <body>
-      ${htmlBody}
-    </body>
-    </html>
-  `;
-  return new Blob([htmlContent], { type: 'text/html' });
+export const generateHTML = (text: string, title: string): Blob => {
+  return new Blob([generateRichHtmlDocument(text, title)], { type: 'text/html;charset=utf-8' });
 };
 
 export const generateEPUB = async (text: string, title: string): Promise<Blob> => {
   const zip = new JSZip();
+  const richHtml = markdownToRichTextHtml(text);
+  const headings = extractHeadingsFromRichHtml(richHtml);
+  const xhtmlBody = toEpubXhtml(richHtml, title);
 
   // 1. mimetype (must be first, no compression)
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
@@ -153,31 +121,15 @@ export const generateEPUB = async (text: string, title: string): Promise<Blob> =
    </rootfiles>
 </container>`);
 
-  // Prepare content for XHTML
-  const paragraphs = text.split('\n\n');
-  let xhtmlBody = "";
   let navPoints = "";
   let playOrder = 1;
-
-  paragraphs.forEach((p, index) => {
-    const trimmed = p.trim();
-    if (!trimmed) return;
-
-    if (trimmed.startsWith('# ')) {
-      const headerText = trimmed.replace('# ', '');
-      const id = `section-${index}`;
-      xhtmlBody += `<h2 id="${id}">${headerText}</h2>\n`;
-      
-      // Add to TOC
-      navPoints += `
+  headings.forEach((heading) => {
+    navPoints += `
         <navPoint id="navPoint-${playOrder}" playOrder="${playOrder}">
-          <navLabel><text>${headerText}</text></navLabel>
-          <content src="content.xhtml#${id}"/>
+          <navLabel><text>${heading.title}</text></navLabel>
+          <content src="content.xhtml#${heading.id}"/>
         </navPoint>`;
-      playOrder++;
-    } else {
-      xhtmlBody += `<p>${trimmed}</p>\n`;
-    }
+    playOrder += 1;
   });
 
   const uniqueId = `urn:uuid:${crypto.randomUUID()}`;
@@ -223,9 +175,13 @@ export const generateEPUB = async (text: string, title: string): Promise<Blob> =
 <head>
   <title>${title}</title>
   <style type="text/css">
-    body { font-family: serif; line-height: 1.5; margin: 2em; }
-    h2 { font-weight: bold; margin-top: 1.5em; page-break-after: avoid; }
-    p { margin-bottom: 1em; text-align: justify; }
+    body { font-family: serif; line-height: 1.6; margin: 2em; }
+    h1, h2, h3 { font-weight: bold; margin-top: 1.5em; page-break-after: avoid; }
+    p, li, blockquote { margin-bottom: 1em; text-align: justify; }
+    ul, ol { padding-left: 1.5em; }
+    blockquote { border-left: 3px solid #888; margin-left: 0; padding-left: 1em; }
+    code { font-family: monospace; }
+    pre { white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -240,4 +196,48 @@ export const generateEPUB = async (text: string, title: string): Promise<Blob> =
   oebps.file("content.xhtml", xhtmlContent);
 
   return await zip.generateAsync({ type: "blob", mimeType: "application/epub+zip" });
+};
+
+export const downloadPDF = async (text: string, title: string, filename: string): Promise<void> => {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    throw new Error('PDF export is only available in the browser.');
+  }
+
+  const container = document.createElement('div');
+  container.innerHTML = generateRichHtmlDocument(text, title);
+  container.style.left = '-99999px';
+  container.style.position = 'fixed';
+  container.style.top = '0';
+  container.style.width = '794px';
+  document.body.appendChild(container);
+
+  try {
+    const content = container.querySelector('main');
+    if (!content) {
+      throw new Error('Unable to prepare document content for PDF export.');
+    }
+
+    const pdf = new jsPDF({
+      format: 'a4',
+      unit: 'pt',
+    });
+
+    await pdf.html(content as HTMLElement, {
+      autoPaging: 'text',
+      callback: (doc) => {
+        doc.save(filename);
+      },
+      html2canvas: {
+        backgroundColor: '#ffffff',
+        scale: 0.7,
+      },
+      margin: [36, 36, 36, 36],
+      width: 523,
+      windowWidth: 794,
+      x: 36,
+      y: 36,
+    });
+  } finally {
+    document.body.removeChild(container);
+  }
 };

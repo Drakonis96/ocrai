@@ -20,6 +20,10 @@ export const getPageIssueType = (page: PageData, overrideText?: string): 'error'
     return 'error';
   }
 
+  if (page.blankPage === true) {
+    return null;
+  }
+
   if (page.status === 'completed' && !pageHasTranscription(page, overrideText)) {
     return 'blank';
   }

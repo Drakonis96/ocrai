@@ -86,6 +86,8 @@ const createManager = (dataDir, processPage, config = {}) =>
     },
   });
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 afterEach(async () => {
   await Promise.all(createdDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -234,5 +236,69 @@ describe('document processing manager', () => {
     expect(stored.failedPages).toBe(1);
     expect(stored.pages[0].status).toBe('completed');
     expect(stored.pages[1].status).toBe('error');
+  });
+
+  it.each([1, 2, 5, 10])('processes pages in parallel up to pagesPerBatch=%s without duplicate attempts', async (pagesPerBatch) => {
+    const docId = `doc-batch-${pagesPerBatch}`;
+    const pageCount = 10;
+    const metadata = createMetadata({
+      docId,
+      pages: Array.from({ length: pageCount }, (_, index) => createPage(docId, index + 1)),
+    });
+    metadata.pagesPerBatch = pagesPerBatch;
+
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    const attemptsByPage = new Map();
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    const manager = createManager(
+      dataDir,
+      async ({ pageNumber }) => {
+        attemptsByPage.set(pageNumber, (attemptsByPage.get(pageNumber) ?? 0) + 1);
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+
+        await sleep(pageNumber % 2 === 0 ? 5 : 25);
+
+        inFlight -= 1;
+        return createBlocks(pageNumber);
+      },
+      { maxRetries: 0 }
+    );
+
+    await manager.processDocumentBackground(docId);
+
+    const stored = await readMetadata(docDir);
+    expect(maxInFlight).toBe(Math.min(pagesPerBatch, pageCount));
+    expect(Array.from(attemptsByPage.values())).toEqual(Array(pageCount).fill(1));
+    expect(stored.status).toBe('ready');
+    expect(stored.processedPages).toBe(pageCount);
+    expect(stored.failedPages).toBe(0);
+  });
+
+  it('persists blank-page classifications returned by the processor', async () => {
+    const docId = 'doc-blank-page';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    const manager = createManager(dataDir, async () => ({
+      blankPage: true,
+      blocks: [],
+    }));
+
+    await manager.processDocumentBackground(docId);
+
+    const stored = await readMetadata(docDir);
+    expect(stored.status).toBe('ready');
+    expect(stored.processedPages).toBe(1);
+    expect(stored.failedPages).toBe(0);
+    expect(stored.pages[0].status).toBe('completed');
+    expect(stored.pages[0].blankPage).toBe(true);
+    expect(stored.pages[0].blocks).toEqual([]);
   });
 });
