@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.2 - 2026-03-25
+
+### Fixed
+- Reworked the editor header so very long document titles stay truncated and no longer push `Save`, `Export`, or `Reprocess` into unstable wraps on compact layouts.
+- Changed compact export behavior to a fixed bottom sheet, avoiding the broken dropdown loop when the header had insufficient horizontal or vertical space.
+- Stabilized the editor action bar on smaller screens with a responsive grid so the same overflow bug does not reappear on mobile.
+
+### Testing
+- Added regression coverage for long-title editor headers and compact export behavior.
+
 ## v1.2.1 - 2026-03-25
 
 ### Fixed

@@ -77,6 +77,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   const [selectedLabels, setSelectedLabels] = useState<BlockLabel[]>([BlockLabel.TITLE, BlockLabel.MAIN_TEXT]);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('preview');
   const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [isCompactHeaderLayout, setIsCompactHeaderLayout] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [reprocessOptions, setReprocessOptions] = useState<ProcessingOptions>({
     model: DEFAULT_MODEL_ID,
@@ -205,23 +206,30 @@ const EditorView: React.FC<EditorViewProps> = ({
       return;
     }
 
-    const mediaQuery = window.matchMedia('(max-width: 1023px)');
-    const syncMobileLayout = () => {
-      setIsMobileLayout(mediaQuery.matches);
-      if (mediaQuery.matches) {
+    const mobileMediaQuery = window.matchMedia('(max-width: 1023px)');
+    const compactHeaderMediaQuery = window.matchMedia('(max-width: 1279px)');
+    const syncResponsiveLayout = () => {
+      setIsMobileLayout(mobileMediaQuery.matches);
+      setIsCompactHeaderLayout(compactHeaderMediaQuery.matches);
+
+      if (mobileMediaQuery.matches) {
         setShowEditor(true);
         setIsResizing(false);
       }
     };
 
-    syncMobileLayout();
-    mediaQuery.addEventListener('change', syncMobileLayout);
+    syncResponsiveLayout();
+    mobileMediaQuery.addEventListener('change', syncResponsiveLayout);
+    compactHeaderMediaQuery.addEventListener('change', syncResponsiveLayout);
 
-    return () => mediaQuery.removeEventListener('change', syncMobileLayout);
+    return () => {
+      mobileMediaQuery.removeEventListener('change', syncResponsiveLayout);
+      compactHeaderMediaQuery.removeEventListener('change', syncResponsiveLayout);
+    };
   }, []);
 
   useEffect(() => {
-    if (!isExportMenuOpen) {
+    if (!isExportMenuOpen || isCompactHeaderLayout) {
       return;
     }
 
@@ -238,6 +246,22 @@ const EditorView: React.FC<EditorViewProps> = ({
     document.addEventListener('pointerdown', handleDocumentPointerDown);
 
     return () => document.removeEventListener('pointerdown', handleDocumentPointerDown);
+  }, [isCompactHeaderLayout, isExportMenuOpen]);
+
+  useEffect(() => {
+    if (!isExportMenuOpen) {
+      return;
+    }
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsExportMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleEscape);
+
+    return () => document.removeEventListener('keydown', handleEscape);
   }, [isExportMenuOpen]);
 
   const handleTextChange = (newText: string) => {
@@ -544,6 +568,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   const batchReprocessLabel = issuePageIndexes.length === 1
     ? 'Reprocess issue'
     : `Reprocess ${issuePageIndexes.length} issues`;
+  const headerActionButtonClassName = 'w-full justify-center xl:w-auto';
   const reprocessModalTitle = reprocessScope === 'issues'
     ? (issuePageIndexes.length === 1 ? 'Reprocess 1 issue page' : `Reprocess ${issuePageIndexes.length} issue pages`)
     : `Reprocess Page ${activePage + 1}`;
@@ -559,6 +584,16 @@ const EditorView: React.FC<EditorViewProps> = ({
   const reprocessOverlayDescription = reprocessProgress?.total && reprocessProgress.total > 1
     ? `Working through issue pages one by one. Current page: ${reprocessProgress.pageNumber}.`
     : 'Please wait while we analyze the document with Gemini AI.';
+
+  const renderExportOptions = (className: string) => (
+    <div className={className} onClick={(event) => event.stopPropagation()}>
+      <button type="button" onClick={() => handleDownload('md')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Markdown (.md)</button>
+      <button type="button" onClick={() => handleDownload('pdf')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">PDF (.pdf)</button>
+      <button type="button" onClick={() => handleDownload('epub')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">EPUB (.epub)</button>
+      <button type="button" onClick={() => handleDownload('html')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">HTML (.html)</button>
+      <button type="button" onClick={() => handleDownload('txt')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Plain text (.txt)</button>
+    </div>
+  );
 
   const filterControls = (
     <div className="flex flex-wrap items-center gap-3 py-1">
@@ -753,21 +788,27 @@ const EditorView: React.FC<EditorViewProps> = ({
   return (
     <div className="flex h-full flex-col bg-slate-100 transition-colors dark:bg-slate-900">
       <header className="z-10 border-b border-slate-200 bg-white px-4 py-4 transition-colors dark:border-slate-700 dark:bg-slate-800 sm:px-6">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-start">
             <IconActionButton
               icon={<ArrowLeftIcon className="h-4 w-4" />}
               label="Back"
               isActive
+              className="w-full justify-center sm:w-auto"
               onClick={onBack}
             />
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-lg font-semibold text-slate-900 dark:text-white" title={workingDoc.name}>
+              <div className="flex min-w-0 items-start gap-2">
+                <h1
+                  data-testid="editor-document-title"
+                  className="min-w-0 flex-1 truncate text-lg font-semibold text-slate-900 dark:text-white"
+                  title={workingDoc.name}
+                >
                   {workingDoc.name}
                 </h1>
-                <div className="relative flex items-center">
+                <div className="relative flex shrink-0 items-center">
                   <button
+                    type="button"
                     onClick={handleCopyTitle}
                     className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-700 dark:hover:text-blue-400"
                     title="Copy title"
@@ -780,6 +821,8 @@ const EditorView: React.FC<EditorViewProps> = ({
                     </span>
                   )}
                 </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                   {workingDoc.pages.length} pages
                 </span>
@@ -787,38 +830,34 @@ const EditorView: React.FC<EditorViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div
+            data-testid="editor-header-actions"
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:flex xl:flex-nowrap xl:items-center xl:justify-end"
+          >
             <IconActionButton
               icon={<CheckCircleIcon className="h-4 w-4" />}
               label={isSavingDocument ? 'Saving' : (isSaved ? 'Saved' : 'Save')}
               isActive={isSavingDocument || !isSaved}
               variant={isSaved && !isSavingDocument ? 'success' : 'primary'}
               disabled={isSavingDocument}
+              className={headerActionButtonClassName}
               onClick={handleSave}
             />
 
-            <div ref={exportMenuRef} className="relative">
+            <div ref={exportMenuRef} className="relative min-w-0 xl:min-w-fit">
               <IconActionButton
                 icon={<DownloadIcon className="h-4 w-4" />}
                 label="Export"
                 isActive={isExportMenuOpen}
+                className={headerActionButtonClassName}
                 onClick={(event) => {
                   event.stopPropagation();
                   setIsExportMenuOpen((open) => !open);
                 }}
               />
 
-              {isExportMenuOpen && (
-                <div
-                  className="absolute right-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <button type="button" onClick={() => handleDownload('md')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Markdown (.md)</button>
-                  <button type="button" onClick={() => handleDownload('pdf')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">PDF (.pdf)</button>
-                  <button type="button" onClick={() => handleDownload('epub')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">EPUB (.epub)</button>
-                  <button type="button" onClick={() => handleDownload('html')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">HTML (.html)</button>
-                  <button type="button" onClick={() => handleDownload('txt')} className="block w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50 hover:text-blue-600 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-blue-400">Plain text (.txt)</button>
-                </div>
+              {!isCompactHeaderLayout && isExportMenuOpen && renderExportOptions(
+                'absolute right-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800'
               )}
             </div>
 
@@ -826,6 +865,7 @@ const EditorView: React.FC<EditorViewProps> = ({
               icon={<RefreshCwIcon className="h-4 w-4" />}
               label="Reprocess"
               isActive={showReprocessModal}
+              className={headerActionButtonClassName}
               onClick={handleOpenCurrentPageReprocess}
             />
             {issuePageIndexes.length > 0 && (
@@ -833,11 +873,40 @@ const EditorView: React.FC<EditorViewProps> = ({
                 icon={<AlertCircleIcon className="h-4 w-4" />}
                 label={batchReprocessLabel}
                 variant="danger"
+                className={headerActionButtonClassName}
                 onClick={handleOpenIssuePagesReprocess}
               />
             )}
           </div>
         </div>
+
+        {isCompactHeaderLayout && isExportMenuOpen && (
+          <div
+            data-testid="editor-export-sheet"
+            className="fixed inset-0 z-[55] bg-black/40 p-4 backdrop-blur-sm"
+            onClick={() => setIsExportMenuOpen(false)}
+          >
+            <div
+              className="absolute inset-x-4 bottom-4 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4 dark:border-slate-700">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">Export document</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Choose a download format without leaving the editor.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsExportMenuOpen(false)}
+                  className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+                >
+                  <CloseIcon className="h-5 w-5" />
+                </button>
+              </div>
+              {renderExportOptions('max-h-[min(70vh,26rem)] overflow-y-auto py-2')}
+            </div>
+          </div>
+        )}
 
         {showErrorBanner && (
           <div className={`mt-4 rounded-3xl border px-4 py-3 ${
