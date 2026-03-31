@@ -585,134 +585,112 @@ function blocksToMarkdown(blocks) {
   }).join('');
 }
 
-async function detectColumns(base64Image, mimeType, modelName) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error("Server API Key configuration missing.");
-  }
+async function detectColumnsFromImage(base64Image) {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const { data, info } = await sharp(imageBuffer)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const { width, height } = info;
 
-  const detectColumnsPrompt = `You are a document layout analysis AI. Analyze this document image and detect the text column structure.
+  // Analyze the central vertical band (skip top/bottom 25% to avoid headers/footers/titles)
+  const yStart = Math.floor(height * 0.25);
+  const yEnd = Math.floor(height * 0.75);
+  const sampleHeight = yEnd - yStart;
+  if (sampleHeight <= 0 || width <= 100) return null;
 
-**TASK**: Determine how many separate text columns the page has and return the horizontal boundaries (x coordinates) of each column.
-
-**RULES**:
-- Only detect clearly separated text columns with a visible vertical gutter between them.
-- Do NOT count margins. Only count distinct content columns.
-- If the page has a single column of text (normal layout), return exactly one column spanning the full text area.
-- Coordinates are normalized 0-1000 where 0 is the left edge and 1000 is the right edge of the image.
-- Order columns from left to right.
-- Each column should include some padding to avoid cutting text.
-
-**OUTPUT**: Return a JSON object with this structure:
-{
-  "columnCount": 2,
-  "columns": [
-    { "xmin": 30, "xmax": 480 },
-    { "xmin": 510, "xmax": 970 }
-  ]
-}`;
-
-  const responseSchema = {
-    type: Type.OBJECT,
-    properties: {
-      columnCount: { type: Type.NUMBER },
-      columns: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            xmin: { type: Type.NUMBER },
-            xmax: { type: Type.NUMBER },
-          },
-          required: ["xmin", "xmax"]
-        }
-      }
-    },
-    required: ["columnCount", "columns"]
-  };
-
-  const response = await ai.models.generateContent({
-    model: modelName || DEFAULT_MODEL_ID,
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: detectColumnsPrompt },
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Image
-            }
-          }
-        ]
-      }
-    ],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: responseSchema,
-      temperature: 0.1,
-      safetySettings: [
-        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }
-      ]
+  // For each x, calculate the ratio of near-white pixels in the sample band
+  const BRIGHT_THRESHOLD = 200;
+  const brightRatio = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    let count = 0;
+    for (let y = yStart; y < yEnd; y++) {
+      if (data[y * width + x] >= BRIGHT_THRESHOLD) count++;
     }
-  });
-
-  const textResponse = typeof response.text === 'function' ? response.text() : response.text;
-  if (!textResponse) {
-    return { columnCount: 1, columns: [{ xmin: 0, xmax: 1000 }] };
+    brightRatio[x] = count / sampleHeight;
   }
 
-  try {
-    const parsed = JSON.parse(textResponse);
-    if (!parsed || !Array.isArray(parsed.columns) || parsed.columns.length <= 1) {
-      return { columnCount: 1, columns: [{ xmin: 0, xmax: 1000 }] };
+  // Smooth the profile to tolerate noise and thin lines
+  const SMOOTH_RADIUS = Math.max(3, Math.floor(width * 0.005));
+  const smoothed = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    let sum = 0, n = 0;
+    for (let k = Math.max(0, x - SMOOTH_RADIUS); k <= Math.min(width - 1, x + SMOOTH_RADIUS); k++) {
+      sum += brightRatio[k]; n++;
     }
-
-    // Sort columns left to right
-    parsed.columns.sort((a, b) => a.xmin - b.xmin);
-    return parsed;
-  } catch {
-    return { columnCount: 1, columns: [{ xmin: 0, xmax: 1000 }] };
+    smoothed[x] = sum / n;
   }
+
+  // Find gutter candidates: continuous high-brightness vertical strips in the inner 80% of width
+  const GUTTER_BRIGHT_THRESHOLD = 0.85;
+  const MIN_GUTTER_PX = Math.max(8, Math.floor(width * 0.015));
+  const margin = Math.floor(width * 0.1);
+  const gutters = [];
+  let gutterStart = -1;
+
+  for (let x = margin; x < width - margin; x++) {
+    if (smoothed[x] >= GUTTER_BRIGHT_THRESHOLD) {
+      if (gutterStart === -1) gutterStart = x;
+    } else if (gutterStart !== -1) {
+      if (x - gutterStart >= MIN_GUTTER_PX) {
+        gutters.push({ left: gutterStart, right: x });
+      }
+      gutterStart = -1;
+    }
+  }
+  if (gutterStart !== -1 && (width - margin) - gutterStart >= MIN_GUTTER_PX) {
+    gutters.push({ left: gutterStart, right: width - margin });
+  }
+
+  if (gutters.length === 0) return null;
+
+  // Build pixel-coordinate column regions from the gutters
+  const MIN_COL_FRACTION = 0.12;
+  const columns = [];
+  let prevRight = 0;
+  for (const g of gutters) {
+    if (g.left - prevRight >= width * MIN_COL_FRACTION) {
+      columns.push({ left: prevRight, right: g.left });
+    }
+    prevRight = g.right;
+  }
+  if (width - prevRight >= width * MIN_COL_FRACTION) {
+    columns.push({ left: prevRight, right: width });
+  }
+
+  return columns.length >= 2 ? { columns, width, height } : null;
 }
 
-async function cropColumnFromImage(base64Image, mimeType, column) {
+async function cropColumnFromImage(base64Image, column, imageHeight) {
   const imageBuffer = Buffer.from(base64Image, 'base64');
-  const metadata = await sharp(imageBuffer).metadata();
-  const width = metadata.width || 1;
-  const height = metadata.height || 1;
-
-  const left = Math.max(0, Math.round((column.xmin / 1000) * width));
-  const right = Math.min(width, Math.round((column.xmax / 1000) * width));
-  const cropWidth = Math.max(1, right - left);
+  const cropWidth = Math.max(1, column.right - column.left);
 
   const croppedBuffer = await sharp(imageBuffer)
-    .extract({ left, top: 0, width: cropWidth, height })
+    .extract({ left: column.left, top: 0, width: cropWidth, height: imageHeight })
     .toBuffer();
 
   return croppedBuffer.toString('base64');
 }
 
 async function processPageWithColumnSplitting(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences) {
-  // Step 1: Detect columns
-  const columnInfo = await detectColumns(base64Image, mimeType, modelName);
+  // Step 1: Detect columns via pixel analysis
+  const detection = await detectColumnsFromImage(base64Image);
 
-  if (columnInfo.columnCount <= 1) {
-    // Single column - process normally
+  if (!detection || detection.columns.length <= 1) {
+    // Single column — process normally
     return processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences);
   }
 
-  // Step 2: Crop and process each column separately
+  console.log(`Detected ${detection.columns.length} columns (px widths: ${detection.columns.map(c => c.right - c.left).join(', ')}), processing each independently`);
+
+  // Step 2: Crop and process each column left-to-right
   const allBlocks = [];
   let isBlankPage = true;
 
-  for (const column of columnInfo.columns) {
-    const croppedBase64 = await cropColumnFromImage(base64Image, mimeType, column);
-    const result = await processPageWithGemini(croppedBase64, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences);
+  for (const column of detection.columns) {
+    const croppedBase64 = await cropColumnFromImage(base64Image, column, detection.height);
+    const result = await processPageWithGemini(croppedBase64, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences, true);
 
     if (!result.blankPage) {
       isBlankPage = false;
@@ -729,7 +707,7 @@ async function processPageWithColumnSplitting(base64Image, mimeType, modelName, 
   };
 }
 
-async function processPageWithGemini(base64Image, mimeType, modelName, processingMode = 'ocr', targetLanguage = '', customPrompt = '', removeReferences = true) {
+async function processPageWithGemini(base64Image, mimeType, modelName, processingMode = 'ocr', targetLanguage = '', customPrompt = '', removeReferences = true, singleColumn = false) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("Server API Key configuration missing.");
   }
@@ -768,6 +746,7 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
     targetLanguage,
     customPrompt,
     removeReferences,
+    singleColumn,
   });
 
   const response = await ai.models.generateContent({

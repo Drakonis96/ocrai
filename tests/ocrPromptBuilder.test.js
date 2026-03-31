@@ -55,4 +55,22 @@ describe('ocr prompt builder', () => {
     expect(prompt).toContain('INDENTATION DEFINES PARAGRAPHS');
     expect(prompt).toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
   });
+
+  it('replaces multi-column rules with single-column instructions when singleColumn is enabled', () => {
+    const prompt = buildOcrPrompt({ singleColumn: true });
+
+    expect(prompt).toContain('SINGLE COLUMN MODE');
+    expect(prompt).toContain('pre-cropped single column');
+    expect(prompt).toContain('Read it straight from top to bottom');
+    expect(prompt).toContain('Read Top to Bottom');
+    expect(prompt).not.toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
+    expect(prompt).not.toContain('DO NOT CROSS COLUMN GUTTERS');
+    expect(prompt).not.toContain('Determine Reading Order');
+
+    // The rest of the OCR rules must still be present
+    expect(prompt).toContain('REAL PARAGRAPH BREAKS ONLY');
+    expect(prompt).toContain('JOIN WRAPPED LINES NATURALLY');
+    expect(prompt).toContain('RECONSTRUCT HYPHENATED WORDS');
+    expect(prompt).toContain('INDENTATION DEFINES PARAGRAPHS');
+  });
 });

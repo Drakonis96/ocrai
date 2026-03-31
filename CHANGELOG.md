@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.3 - 2026-03-31
+
+### Fixed
+- Replaced the unreliable Gemini-based column detection with deterministic pixel-level analysis using `sharp` — the new approach scans vertical brightness profiles to find gutter whitespace, producing correct left-to-right column ordering every time.
+- Added a dedicated `singleColumn` OCR prompt mode so each cropped column is sent to Gemini with explicit "read top to bottom, do not look for multiple columns" instructions, preventing the model from re-splitting or misordering the isolated column image.
+
+### Testing
+- Added coverage for the `singleColumn` prompt builder mode (`47` tests total).
+- Verified the full automated suite, TypeScript compilation, and server syntax after the column detection rewrite.
+
 ## v1.3.2 - 2026-03-31
 
 ### Added
