@@ -56,13 +56,14 @@ describe('ocr prompt builder', () => {
     expect(prompt).toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
   });
 
-  it('replaces multi-column rules with single-column instructions when singleColumn is enabled', () => {
-    const prompt = buildOcrPrompt({ singleColumn: true });
+  it('adds column detection metadata instructions when splitColumns is enabled', () => {
+    const prompt = buildOcrPrompt({ splitColumns: true });
 
-    expect(prompt).toContain('SINGLE COLUMN MODE');
-    expect(prompt).toContain('pre-cropped single column');
-    expect(prompt).toContain('Read it straight from top to bottom');
-    expect(prompt).toContain('Read Top to Bottom');
+    expect(prompt).toContain('COLUMN DETECTION AND METADATA');
+    expect(prompt).toContain('columnIndex');
+    expect(prompt).toContain('readingOrder');
+    expect(prompt).toContain('STRICT COLUMN BOUNDARIES');
+    expect(prompt).toContain('Detect Columns and Assign Order');
     expect(prompt).not.toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
     expect(prompt).not.toContain('DO NOT CROSS COLUMN GUTTERS');
     expect(prompt).not.toContain('Determine Reading Order');

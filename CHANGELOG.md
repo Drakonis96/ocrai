@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.4 - 2026-03-31
+
+### Changed
+- Replaced the pixel-based split-columns pipeline with a Gemini-driven layout-order flow that keeps the full page intact and asks the model to return explicit `columnIndex` and `readingOrder` metadata for each block.
+- Updated the OCR schema and prompt so column metadata is only required when `Split columns before OCR` is enabled, while the normal single-page OCR flow keeps the simpler block format.
+
+### Fixed
+- Stopped the clean-text reconstruction step from reordering column-mode blocks geometrically after OCR; when Gemini returns `readingOrder`, that order is now respected directly instead of mixing left and right columns again.
+- Removed the previous cropped-column `singleColumn` path so column-mode behavior no longer depends on brittle gutter detection or local crop coordinates.
+
+### Testing
+- Updated the prompt-builder regression coverage for the new column metadata instructions and verified the full automated suite (`47` tests).
+
 ## v1.3.3 - 2026-03-31
 
 ### Fixed

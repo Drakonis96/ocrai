@@ -585,135 +585,39 @@ function blocksToMarkdown(blocks) {
   }).join('');
 }
 
-async function detectColumnsFromImage(base64Image) {
-  const imageBuffer = Buffer.from(base64Image, 'base64');
-  const { data, info } = await sharp(imageBuffer)
-    .greyscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const { width, height } = info;
-
-  // Analyze the central vertical band (skip top/bottom 25% to avoid headers/footers/titles)
-  const yStart = Math.floor(height * 0.25);
-  const yEnd = Math.floor(height * 0.75);
-  const sampleHeight = yEnd - yStart;
-  if (sampleHeight <= 0 || width <= 100) return null;
-
-  // For each x, calculate the ratio of near-white pixels in the sample band
-  const BRIGHT_THRESHOLD = 200;
-  const brightRatio = new Float32Array(width);
-  for (let x = 0; x < width; x++) {
-    let count = 0;
-    for (let y = yStart; y < yEnd; y++) {
-      if (data[y * width + x] >= BRIGHT_THRESHOLD) count++;
-    }
-    brightRatio[x] = count / sampleHeight;
-  }
-
-  // Smooth the profile to tolerate noise and thin lines
-  const SMOOTH_RADIUS = Math.max(3, Math.floor(width * 0.005));
-  const smoothed = new Float32Array(width);
-  for (let x = 0; x < width; x++) {
-    let sum = 0, n = 0;
-    for (let k = Math.max(0, x - SMOOTH_RADIUS); k <= Math.min(width - 1, x + SMOOTH_RADIUS); k++) {
-      sum += brightRatio[k]; n++;
-    }
-    smoothed[x] = sum / n;
-  }
-
-  // Find gutter candidates: continuous high-brightness vertical strips in the inner 80% of width
-  const GUTTER_BRIGHT_THRESHOLD = 0.85;
-  const MIN_GUTTER_PX = Math.max(8, Math.floor(width * 0.015));
-  const margin = Math.floor(width * 0.1);
-  const gutters = [];
-  let gutterStart = -1;
-
-  for (let x = margin; x < width - margin; x++) {
-    if (smoothed[x] >= GUTTER_BRIGHT_THRESHOLD) {
-      if (gutterStart === -1) gutterStart = x;
-    } else if (gutterStart !== -1) {
-      if (x - gutterStart >= MIN_GUTTER_PX) {
-        gutters.push({ left: gutterStart, right: x });
-      }
-      gutterStart = -1;
-    }
-  }
-  if (gutterStart !== -1 && (width - margin) - gutterStart >= MIN_GUTTER_PX) {
-    gutters.push({ left: gutterStart, right: width - margin });
-  }
-
-  if (gutters.length === 0) return null;
-
-  // Build pixel-coordinate column regions from the gutters
-  const MIN_COL_FRACTION = 0.12;
-  const columns = [];
-  let prevRight = 0;
-  for (const g of gutters) {
-    if (g.left - prevRight >= width * MIN_COL_FRACTION) {
-      columns.push({ left: prevRight, right: g.left });
-    }
-    prevRight = g.right;
-  }
-  if (width - prevRight >= width * MIN_COL_FRACTION) {
-    columns.push({ left: prevRight, right: width });
-  }
-
-  return columns.length >= 2 ? { columns, width, height } : null;
-}
-
-async function cropColumnFromImage(base64Image, column, imageHeight) {
-  const imageBuffer = Buffer.from(base64Image, 'base64');
-  const cropWidth = Math.max(1, column.right - column.left);
-
-  const croppedBuffer = await sharp(imageBuffer)
-    .extract({ left: column.left, top: 0, width: cropWidth, height: imageHeight })
-    .toBuffer();
-
-  return croppedBuffer.toString('base64');
-}
-
-async function processPageWithColumnSplitting(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences) {
-  // Step 1: Detect columns via pixel analysis
-  const detection = await detectColumnsFromImage(base64Image);
-
-  if (!detection || detection.columns.length <= 1) {
-    // Single column — process normally
-    return processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences);
-  }
-
-  console.log(`Detected ${detection.columns.length} columns (px widths: ${detection.columns.map(c => c.right - c.left).join(', ')}), processing each independently`);
-
-  // Step 2: Crop and process each column left-to-right
-  const allBlocks = [];
-  let isBlankPage = true;
-
-  for (const column of detection.columns) {
-    const croppedBase64 = await cropColumnFromImage(base64Image, column, detection.height);
-    const result = await processPageWithGemini(croppedBase64, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences, true);
-
-    if (!result.blankPage) {
-      isBlankPage = false;
-    }
-
-    if (Array.isArray(result.blocks)) {
-      allBlocks.push(...result.blocks);
-    }
-  }
-
-  return {
-    blankPage: isBlankPage,
-    blocks: isBlankPage ? [] : allBlocks,
-  };
-}
-
-async function processPageWithGemini(base64Image, mimeType, modelName, processingMode = 'ocr', targetLanguage = '', customPrompt = '', removeReferences = true, singleColumn = false) {
+async function processPageWithGemini(base64Image, mimeType, modelName, processingMode = 'ocr', targetLanguage = '', customPrompt = '', removeReferences = true, splitColumns = false) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("Server API Key configuration missing.");
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     
+  const blockProperties = {
+    text: { type: Type.STRING },
+    label: { 
+      type: Type.STRING, 
+      enum: BlockLabelValues 
+    },
+    box_2d: {
+      type: Type.ARRAY,
+      items: { type: Type.NUMBER },
+      description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000"
+    }
+  };
+  const blockRequired = ["text", "label"];
+
+  if (splitColumns) {
+    blockProperties.columnIndex = {
+      type: Type.NUMBER,
+      description: "0-based column number (0 = leftmost)"
+    };
+    blockProperties.readingOrder = {
+      type: Type.NUMBER,
+      description: "Sequential reading order across the entire page (0-based)"
+    };
+    blockRequired.push("columnIndex", "readingOrder");
+  }
+
   const responseSchema = {
     type: Type.OBJECT,
     properties: {
@@ -722,19 +626,8 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
-          properties: {
-            text: { type: Type.STRING },
-            label: { 
-              type: Type.STRING, 
-              enum: BlockLabelValues 
-            },
-            box_2d: {
-              type: Type.ARRAY,
-              items: { type: Type.NUMBER },
-              description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000"
-            }
-          },
-          required: ["text", "label"]
+          properties: blockProperties,
+          required: blockRequired
         }
       }
     },
@@ -746,7 +639,7 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
     targetLanguage,
     customPrompt,
     removeReferences,
-    singleColumn,
+    splitColumns,
   });
 
   const response = await ai.models.generateContent({
@@ -816,9 +709,7 @@ const { processDocumentBackground, resumePendingDocuments } = createDocumentProc
     customPrompt,
     removeReferences,
     splitColumns,
-  }) => splitColumns
-    ? processPageWithColumnSplitting(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences)
-    : processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences),
+  }) => processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences, splitColumns),
 });
 
 app.post('/api/reprocess-page', async (req, res) => {

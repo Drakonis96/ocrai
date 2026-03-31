@@ -20,6 +20,8 @@ export interface TextBlock {
   text: string;
   label: BlockLabel;
   box_2d?: number[]; // [ymin, xmin, ymax, xmax] standard Gemini normalized
+  columnIndex?: number;
+  readingOrder?: number;
 }
 
 export interface PageData {
