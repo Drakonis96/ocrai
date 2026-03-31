@@ -22,6 +22,7 @@
 - Ensured edited document names, read state, and labels remain preserved while background OCR processing is still running.
 - Made downloaded/exported content, manual prompts, and background processing flows respect the latest OCR reconstruction rules consistently.
 - Cleaned App-level test mocks so new labeling settings do not generate fetch errors during validation.
+- Hardened Docker release builds by switching container dependency installs to lockfile-based `npm ci` with retry settings for registry fetches.
 
 ### Testing
 - Added regression coverage for dashboard labeling, labeling settings, document-label preservation during background processing, and App polling with labeling-aware settings loads.
