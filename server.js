@@ -16,6 +16,7 @@ import {
   getPagesPerBatch,
   normalizeDocumentRuntimeState,
 } from './services/documentProcessing.js';
+import { buildOcrPrompt } from './services/ocrPromptBuilder.js';
 
 // Load environment variables
 dotenv.config({ path: '.env.local' });
@@ -184,10 +185,16 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const MODELS_FILE = path.join(DATA_DIR, 'models.json');
 const PROMPTS_FILE = path.join(DATA_DIR, 'prompts.json');
+const LABELS_FILE = path.join(DATA_DIR, 'labels.json');
+const LABELING_SETTINGS_FILE = path.join(DATA_DIR, 'labeling-settings.json');
+const DEFAULT_MODEL_ID = 'gemini-flash-lite-latest';
+const DEFAULT_LABELING_SETTINGS = {
+  autoLabelDocuments: false,
+};
 
 const DEFAULT_MODELS = [
+  { id: DEFAULT_MODEL_ID, name: 'Gemini Flash Lite Latest', description: 'Cheapest' },
   { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' },
-  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite Latest', description: 'Faster' },
 ];
 
 const REMOVED_MODEL_IDS = new Set(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
@@ -307,6 +314,144 @@ const writePrompts = async (prompts) => {
   return normalized;
 };
 
+const normalizeLabelName = (value) => {
+  const name = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : '';
+  return name || null;
+};
+
+const normalizeDocumentLabels = (labels) => {
+  if (!Array.isArray(labels)) {
+    return [];
+  }
+
+  const seen = new Set();
+  const normalized = [];
+
+  labels.forEach((label) => {
+    const normalizedLabel = normalizeLabelName(label);
+    if (!normalizedLabel) {
+      return;
+    }
+
+    const key = normalizedLabel.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    normalized.push(normalizedLabel);
+  });
+
+  return normalized;
+};
+
+const sortLabels = (labels) =>
+  [...labels].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+
+const readLabels = async () => {
+  if (!fs.existsSync(LABELS_FILE)) {
+    return [];
+  }
+
+  const data = await fs.promises.readFile(LABELS_FILE, 'utf-8');
+  const parsed = JSON.parse(data);
+  const normalized = sortLabels(normalizeDocumentLabels(parsed));
+  const normalizedJson = JSON.stringify(normalized, null, 2);
+
+  if (normalizedJson !== JSON.stringify(parsed, null, 2)) {
+    await fs.promises.writeFile(LABELS_FILE, normalizedJson);
+  }
+
+  return normalized;
+};
+
+const writeLabels = async (labels) => {
+  const normalized = sortLabels(normalizeDocumentLabels(labels));
+  await fs.promises.writeFile(LABELS_FILE, JSON.stringify(normalized, null, 2));
+  return normalized;
+};
+
+const normalizeLabelingSettings = (settings) => ({
+  autoLabelDocuments: settings?.autoLabelDocuments === true,
+});
+
+const readLabelingSettings = async () => {
+  if (!fs.existsSync(LABELING_SETTINGS_FILE)) {
+    return { ...DEFAULT_LABELING_SETTINGS };
+  }
+
+  const data = await fs.promises.readFile(LABELING_SETTINGS_FILE, 'utf-8');
+  const parsed = JSON.parse(data);
+  const normalized = normalizeLabelingSettings(parsed);
+  const normalizedJson = JSON.stringify(normalized, null, 2);
+
+  if (normalizedJson !== JSON.stringify(parsed, null, 2)) {
+    await fs.promises.writeFile(LABELING_SETTINGS_FILE, normalizedJson);
+  }
+
+  return normalized;
+};
+
+const writeLabelingSettings = async (settings) => {
+  const normalized = normalizeLabelingSettings(settings);
+  await fs.promises.writeFile(LABELING_SETTINGS_FILE, JSON.stringify(normalized, null, 2));
+  return normalized;
+};
+
+const selectLabelsForDocumentName = async (documentName, availableLabels, modelName = DEFAULT_MODEL_ID) => {
+  const normalizedDocumentName = typeof documentName === 'string' ? documentName.trim() : '';
+  const canonicalLabels = normalizeDocumentLabels(availableLabels);
+  if (!normalizedDocumentName || canonicalLabels.length === 0 || !process.env.GEMINI_API_KEY) {
+    return [];
+  }
+
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      labels: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
+    },
+    required: ['labels'],
+  };
+
+  const prompt = [
+    'You assign document labels using only the document name.',
+    `Document name: "${normalizedDocumentName}"`,
+    `Available labels: ${canonicalLabels.join(', ')}`,
+    'Choose the most relevant labels from the available list.',
+    'Use only labels from the available list.',
+    'Return between 0 and 3 labels.',
+    'Prefer fewer labels when uncertain.',
+  ].join('\n');
+
+  const response = await ai.models.generateContent({
+    model: modelName || DEFAULT_MODEL_ID,
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema,
+      temperature: 0.1,
+    },
+  });
+
+  const responseText = typeof response.text === 'function' ? response.text() : response.text;
+  if (!responseText) {
+    return [];
+  }
+
+  const parsed = JSON.parse(responseText);
+  const selectedLabels = Array.isArray(parsed?.labels) ? parsed.labels : [];
+  const labelsByKey = new Map(canonicalLabels.map((label) => [label.toLowerCase(), label]));
+
+  return normalizeDocumentLabels(selectedLabels)
+    .map((label) => labelsByKey.get(label.toLowerCase()) || null)
+    .filter(Boolean)
+    .slice(0, 3);
+};
+
 // --- API ROUTES ---
 
 app.post('/api/login', async (req, res) => {
@@ -420,93 +565,6 @@ app.use('/api', async (req, res, next) => {
   next();
 });
 
-const OCR_LAYOUT_PROMPT = `
-You are a highly advanced Document Layout Analysis AI. Your task is to perform OCR and layout segmentation on the provided document image.
-
-**CRITICAL INSTRUCTIONS:**
-1.  **LITERAL EXTRACTION ONLY**: Extract the text exactly as it appears in the image. **DO NOT TRANSLATE**. **DO NOT SUMMARIZE**. **DO NOT ADD COMMENTS**.
-2.  **ORIGINAL LANGUAGE**: The text must remain in the original language of the document.
-3.  **JSON ONLY**: Output strictly valid JSON. Do not include markdown formatting (like \`\`\`json) or conversational text.
-4.  **HYPHENATED WORDS ACROSS LINES**: If a word is cut at the end of a line with a hyphen and continues on the next line, do not transcribe the hyphen. Join both fragments into the complete word.
-
-**Task Steps**:
-0.  **Classify Blank Pages**: If the page is blank or only contains scanning artifacts, stains, or edge noise without readable content, set "blankPage" to true and return an empty "blocks" array.
-1.  **Extract Text**: Read all text in the image.
-2.  **Segment Blocks**: Group continuous text into paragraphs (MAIN_TEXT). Do not split a single paragraph into multiple blocks unless necessary (e.g., page break).
-3.  **Label Blocks**: Assign one of the following labels to each block:
-    *   **TITLE**: Titles, subtitles, section headers (usually larger font, bold, centered, or short lines at the start of sections).
-    *   **MAIN_TEXT**: The primary body content of the document.
-    *   **FOOTNOTE**: Notes usually at the bottom of the page, often starting with small numbers/superscripts (1, *, etc.) or containing bibliographic references (Ibid, Op. cit.).
-    *   **HEADER**: Repeated text at the very top (page numbers, chapter titles).
-    *   **FOOTER**: Repeated text at the very bottom (page numbers, book titles).
-    *   **CAPTION**: Text describing images or tables.
-4.  **Handling Ambiguity**: If no clear title exists, label as MAIN_TEXT. Be strict about separating HEADER and FOOTER from MAIN_TEXT.
-
-**Output Format**:
-Return a valid JSON object with the following structure:
-{
-  "blankPage": false,
-  "blocks": [
-    {
-      "text": "The content of the block...",
-      "label": "MAIN_TEXT",
-      "box_2d": [ymin, xmin, ymax, xmax] 
-    },
-    ...
-  ]
-}
-The "box_2d" should be normalized coordinates (0-1000) if possible, or 0-1 range.
-`;
-
-const OCR_LAYOUT_PROMPT_NO_REFS = `
-You are a highly advanced Document Layout Analysis AI. Your task is to perform OCR and layout segmentation on the provided document image.
-
-**CRITICAL INSTRUCTIONS:**
-1.  **LITERAL EXTRACTION ONLY**: Extract the text exactly as it appears in the image. **DO NOT TRANSLATE**. **DO NOT SUMMARIZE**. **DO NOT ADD COMMENTS**.
-2.  **ORIGINAL LANGUAGE**: The text must remain in the original language of the document.
-3.  **JSON ONLY**: Output strictly valid JSON. Do not include markdown formatting (like \`\`\`json) or conversational text.
-4.  **HYPHENATED WORDS ACROSS LINES**: If a word is cut at the end of a line with a hyphen and continues on the next line, do not transcribe the hyphen. Join both fragments into the complete word.
-5.  **REMOVE IN-TEXT REFERENCES**: When extracting MAIN_TEXT blocks, you MUST omit all in-text academic citations and references. These include patterns like:
-    - (Author, Year)
-    - (Author, Year: page)
-    - (Author, Year: p. XX)
-    - (SURNAME, 1908: p. 104)
-    - (Surname, 1908:104)
-    - (Author et al., Year)
-    - (Author & Author, Year)
-    - Multiple authors in parentheses
-    - Any similar APA, MLA, Chicago, or academic citation formats in parentheses
-    Do NOT include these references in the extracted text. Simply skip them entirely, ensuring the remaining text flows naturally.
-
-**Task Steps**:
-0.  **Classify Blank Pages**: If the page is blank or only contains scanning artifacts, stains, or edge noise without readable content, set "blankPage" to true and return an empty "blocks" array.
-1.  **Extract Text**: Read all text in the image.
-2.  **Segment Blocks**: Group continuous text into paragraphs (MAIN_TEXT). Do not split a single paragraph into multiple blocks unless necessary (e.g., page break).
-3.  **Label Blocks**: Assign one of the following labels to each block:
-    *   **TITLE**: Titles, subtitles, section headers (usually larger font, bold, centered, or short lines at the start of sections).
-    *   **MAIN_TEXT**: The primary body content of the document. **Remember to remove all in-text citations from this content.**
-    *   **FOOTNOTE**: Notes usually at the bottom of the page, often starting with small numbers/superscripts (1, *, etc.) or containing bibliographic references (Ibid, Op. cit.).
-    *   **HEADER**: Repeated text at the very top (page numbers, chapter titles).
-    *   **FOOTER**: Repeated text at the very bottom (page numbers, book titles).
-    *   **CAPTION**: Text describing images or tables.
-4.  **Handling Ambiguity**: If no clear title exists, label as MAIN_TEXT. Be strict about separating HEADER and FOOTER from MAIN_TEXT.
-
-**Output Format**:
-Return a valid JSON object with the following structure:
-{
-  "blankPage": false,
-  "blocks": [
-    {
-      "text": "The content of the block...",
-      "label": "MAIN_TEXT",
-      "box_2d": [ymin, xmin, ymax, xmax] 
-    },
-    ...
-  ]
-}
-The "box_2d" should be normalized coordinates (0-1000) if possible, or 0-1 range.
-`;
-
 const BlockLabelValues = [
   'TITLE', 'MAIN_TEXT', 'FOOTNOTE', 'HEADER', 'FOOTER', 'CAPTION', 'UNKNOWN'
 ];
@@ -560,23 +618,15 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
     required: ["blankPage", "blocks"]
   };
 
-  let finalPrompt = removeReferences ? OCR_LAYOUT_PROMPT_NO_REFS : OCR_LAYOUT_PROMPT;
-
-  if (processingMode === 'translation' && targetLanguage) {
-    const basePrompt = removeReferences ? OCR_LAYOUT_PROMPT_NO_REFS : OCR_LAYOUT_PROMPT;
-    finalPrompt = basePrompt.replace(
-      "**LITERAL EXTRACTION ONLY**: Extract the text exactly as it appears in the image. **DO NOT TRANSLATE**. **DO NOT SUMMARIZE**. **DO NOT ADD COMMENTS**.",
-      `**TRANSLATION**: Extract the text and TRANSLATE it into ${targetLanguage}. **DO NOT SUMMARIZE**. **DO NOT ADD COMMENTS**.`
-    ).replace(
-      "**ORIGINAL LANGUAGE**: The text must remain in the original language of the document.",
-      `**TARGET LANGUAGE**: The text must be in ${targetLanguage}.`
-    );
-  } else if (processingMode === 'manual' && customPrompt) {
-    finalPrompt = customPrompt;
-  }
+  const finalPrompt = buildOcrPrompt({
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences,
+  });
 
   const response = await ai.models.generateContent({
-    model: modelName || 'gemini-flash-latest',
+    model: modelName || DEFAULT_MODEL_ID,
     contents: [
       {
         role: 'user',
@@ -742,6 +792,91 @@ app.post('/api/reprocess-page', async (req, res) => {
   }
 });
 
+app.post('/api/reprocess-document', async (req, res) => {
+  const { docId, modelName } = req.body;
+
+  try {
+    const safeDocId = assertDocumentId(docId);
+    const nextModelName = typeof modelName === 'string' && modelName.trim() ? modelName.trim() : '';
+    const docDir = resolveDocumentDir(safeDocId);
+    const metadataPath = path.join(docDir, 'metadata.json');
+
+    if (!fs.existsSync(metadataPath)) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+    if (docData?.type !== 'file') {
+      throw createPublicError(400, 'Only documents can be reprocessed');
+    }
+
+    normalizeDocumentRuntimeState(docData);
+    docData.isRead = docData.isRead === true;
+    const availableLabels = await readLabels();
+    docData.labels = normalizeDocumentLabels(docData.labels).filter((label) =>
+      availableLabels.some((availableLabel) => availableLabel.toLowerCase() === label.toLowerCase())
+    );
+
+    if (!Array.isArray(docData.pages) || docData.pages.length === 0) {
+      throw createPublicError(400, 'Document has no pages to reprocess');
+    }
+
+    if (docData.status === 'processing' || docData.status === 'uploading') {
+      throw createPublicError(409, 'Document is already processing');
+    }
+
+    docData.modelUsed = nextModelName || DEFAULT_MODEL_ID;
+    if (docData.labels.length === 0) {
+      const labelingSettings = await readLabelingSettings();
+      if (labelingSettings.autoLabelDocuments && availableLabels.length > 0) {
+        try {
+          docData.labels = await selectLabelsForDocumentName(docData.name, availableLabels, docData.modelUsed);
+        } catch (labelingError) {
+          console.error(`Automatic labeling failed during reprocessing for "${docData.name}"`, labelingError);
+        }
+      }
+    }
+    docData.pages = docData.pages.map((page, index) => ({
+      ...page,
+      pageNumber: getPageNumber(page, index + 1),
+      blocks: [],
+      status: 'pending',
+      blankPage: false,
+      errorDismissed: false,
+      retryCount: 0,
+      lastError: '',
+      nextRetryAt: null,
+      lastAttemptAt: null,
+    }));
+    delete docData.savedText;
+    delete docData.pageSavedTexts;
+
+    const docEntries = await fs.promises.readdir(docDir, { withFileTypes: true });
+    await Promise.all(
+      docEntries
+        .filter((entry) => (
+          entry.isFile()
+          && (
+            (entry.name.startsWith('page_') && entry.name.endsWith('.md'))
+            || entry.name.endsWith('_edited.md')
+          )
+        ))
+        .map((entry) => fs.promises.rm(path.join(docDir, entry.name), { force: true }))
+    );
+
+    normalizeDocumentRuntimeState(docData);
+    await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+
+    processDocumentBackground(safeDocId).catch((error) => {
+      console.error(`Background reprocessing trigger failed for ${safeDocId}`, error);
+    });
+
+    res.json(docData);
+  } catch (error) {
+    handleRouteError(res, 'Reprocess document error', error, 'Failed to reprocess document');
+  }
+});
+
 app.post('/api/process-page', async (req, res) => {
   const { base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences } = req.body;
 
@@ -788,7 +923,7 @@ app.post('/api/generate-logo', async (req, res) => {
       model: 'gemini-2.5-flash-image',
       contents: {
         parts: [
-          { text: "A minimalist, modern vector logo for an app called 'DocuClean AI'. The icon should feature a stylized document or sheet of paper being cleaned or sparkling, implying clarity and organization. Use a color palette of Royal Blue, Slate Grey, and White. Flat design, clean lines, suitable for an app icon." }
+          { text: "A minimalist, modern vector logo for an app called 'ocrAI'. The icon should feature a stylized document or sheet of paper being cleaned or sparkling, implying clarity and organization. Use a color palette of Royal Blue, Slate Grey, and White. Flat design, clean lines, suitable for an app icon." }
         ]
       },
       config: {
@@ -845,6 +980,8 @@ app.get('/api/documents', async (req, res) => {
           const parsedItem = JSON.parse(data);
           if (parsedItem?.type === 'file') {
             normalizeDocumentRuntimeState(parsedItem);
+            parsedItem.isRead = parsedItem.isRead === true;
+            parsedItem.labels = normalizeDocumentLabels(parsedItem.labels);
           }
           items.push(parsedItem);
         } catch (err) {
@@ -867,6 +1004,29 @@ app.post('/api/documents', async (req, res) => {
     }
 
     item.id = assertDocumentId(item.id);
+    item.name = item.name.trim();
+    if (!item.name) {
+      throw createPublicError(400, 'Document name is required');
+    }
+
+    if (item.type === 'file') {
+      const availableLabels = await readLabels();
+      item.labels = normalizeDocumentLabels(item.labels).filter((label) =>
+        availableLabels.some((availableLabel) => availableLabel.toLowerCase() === label.toLowerCase())
+      );
+
+      if (item.startProcessing && item.labels.length === 0) {
+        const labelingSettings = await readLabelingSettings();
+        if (labelingSettings.autoLabelDocuments && availableLabels.length > 0) {
+          try {
+            item.labels = await selectLabelsForDocumentName(item.name, availableLabels, item.modelUsed || DEFAULT_MODEL_ID);
+          } catch (labelingError) {
+            console.error(`Automatic labeling failed for "${item.name}"`, labelingError);
+          }
+        }
+      }
+    }
+
     const docDir = resolveDocumentDir(item.id);
     if (!fs.existsSync(docDir)) {
       await fs.promises.mkdir(docDir, { recursive: true });
@@ -874,6 +1034,7 @@ app.post('/api/documents', async (req, res) => {
 
     // Handle image saving for files
     if (item.type === 'file' && item.pages && Array.isArray(item.pages)) {
+      item.isRead = item.isRead === true;
       item.pagesPerBatch = getPagesPerBatch(item.pagesPerBatch);
       for (let i = 0; i < item.pages.length; i++) {
         const page = item.pages[i];
@@ -915,12 +1076,21 @@ app.post('/api/documents', async (req, res) => {
       normalizeDocumentRuntimeState(item);
     }
 
-    // Save the full edited text to a markdown file if savedText exists
-    if (item.type === 'file' && item.savedText) {
-      const cleanName = sanitizeDocumentBaseName(item.name);
-      const fullDocMarkdownPath = path.join(docDir, `${cleanName}_edited.md`);
-      await fs.promises.writeFile(fullDocMarkdownPath, item.savedText);
-      console.log(`Saved edited document text to: ${fullDocMarkdownPath}`);
+    // Keep the edited markdown companion aligned with the current document name.
+    if (item.type === 'file') {
+      const docEntries = await fs.promises.readdir(docDir, { withFileTypes: true });
+      await Promise.all(
+        docEntries
+          .filter((entry) => entry.isFile() && entry.name.endsWith('_edited.md'))
+          .map((entry) => fs.promises.rm(path.join(docDir, entry.name), { force: true }))
+      );
+
+      if (typeof item.savedText === 'string' && item.savedText) {
+        const cleanName = sanitizeDocumentBaseName(item.name);
+        const fullDocMarkdownPath = path.join(docDir, `${cleanName}_edited.md`);
+        await fs.promises.writeFile(fullDocMarkdownPath, item.savedText);
+        console.log(`Saved edited document text to: ${fullDocMarkdownPath}`);
+      }
     }
 
     // Save metadata (now with URLs instead of base64)
@@ -1029,6 +1199,100 @@ app.delete('/api/prompts/:id', async (req, res) => {
     res.json(await writePrompts(nextPrompts));
   } catch (error) {
     handleRouteError(res, 'Failed to delete prompt', error);
+  }
+});
+
+app.get('/api/labels', async (req, res) => {
+  try {
+    res.json(await readLabels());
+  } catch (error) {
+    handleRouteError(res, 'Failed to load labels', error);
+  }
+});
+
+app.post('/api/labels', async (req, res) => {
+  try {
+    const labelName = normalizeLabelName(req.body?.name);
+    if (!labelName) {
+      return res.status(400).json({ error: 'Label name is required' });
+    }
+
+    const labels = await readLabels();
+    const duplicate = labels.find((label) => label.toLowerCase() === labelName.toLowerCase());
+    if (duplicate) {
+      return res.status(400).json({ error: `Label "${duplicate}" already exists` });
+    }
+
+    res.json(await writeLabels([...labels, labelName]));
+  } catch (error) {
+    handleRouteError(res, 'Failed to create label', error);
+  }
+});
+
+app.delete('/api/labels/:name', async (req, res) => {
+  try {
+    const labelName = normalizeLabelName(req.params.name);
+    if (!labelName) {
+      return res.status(400).json({ error: 'Label name is required' });
+    }
+
+    const labels = await readLabels();
+    const nextLabels = labels.filter((label) => label.toLowerCase() !== labelName.toLowerCase());
+    if (nextLabels.length === labels.length) {
+      return res.status(404).json({ error: 'Label not found' });
+    }
+
+    await writeLabels(nextLabels);
+
+    const entries = await fs.promises.readdir(DATA_DIR, { withFileTypes: true });
+    await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+      const metadataPath = path.join(DATA_DIR, entry.name, 'metadata.json');
+      if (!fs.existsSync(metadataPath)) {
+        return;
+      }
+
+      try {
+        const rawMetadata = await fs.promises.readFile(metadataPath, 'utf-8');
+        const item = JSON.parse(rawMetadata);
+        if (item?.type !== 'file') {
+          return;
+        }
+
+        const nextDocumentLabels = normalizeDocumentLabels(item.labels).filter(
+          (label) => label.toLowerCase() !== labelName.toLowerCase()
+        );
+
+        if (JSON.stringify(nextDocumentLabels) === JSON.stringify(normalizeDocumentLabels(item.labels))) {
+          return;
+        }
+
+        item.labels = nextDocumentLabels;
+        normalizeDocumentRuntimeState(item);
+        await fs.promises.writeFile(metadataPath, JSON.stringify(item, null, 2));
+      } catch (documentError) {
+        console.warn(`Failed to remove deleted label from ${entry.name}:`, documentError.message);
+      }
+    }));
+
+    res.json(await readLabels());
+  } catch (error) {
+    handleRouteError(res, 'Failed to delete label', error);
+  }
+});
+
+app.get('/api/labeling-settings', async (req, res) => {
+  try {
+    res.json(await readLabelingSettings());
+  } catch (error) {
+    handleRouteError(res, 'Failed to load labeling settings', error);
+  }
+});
+
+app.put('/api/labeling-settings', async (req, res) => {
+  try {
+    res.json(await writeLabelingSettings(req.body));
+  } catch (error) {
+    handleRouteError(res, 'Failed to update labeling settings', error);
   }
 });
 

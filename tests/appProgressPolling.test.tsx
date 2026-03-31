@@ -17,6 +17,11 @@ const getPrompts = vi.fn();
 const createPrompt = vi.fn();
 const updatePrompt = vi.fn();
 const deletePrompt = vi.fn();
+const getLabels = vi.fn();
+const createLabel = vi.fn();
+const deleteLabel = vi.fn();
+const getLabelingSettings = vi.fn();
+const updateLabelingSettings = vi.fn();
 
 vi.mock('../utils/storage', () => ({
   getAllItems,
@@ -39,6 +44,14 @@ vi.mock('../services/promptService', () => ({
   createPrompt,
   updatePrompt,
   deletePrompt,
+}));
+
+vi.mock('../services/labelingService', () => ({
+  getLabels,
+  createLabel,
+  deleteLabel,
+  getLabelingSettings,
+  updateLabelingSettings,
 }));
 
 vi.mock('../components/Login', () => ({
@@ -153,6 +166,10 @@ describe('App processing polling', () => {
     getModels.mockResolvedValue([{ id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' }]);
     getPrompts.mockReset();
     getPrompts.mockResolvedValue([]);
+    getLabels.mockReset();
+    getLabels.mockResolvedValue([]);
+    getLabelingSettings.mockReset();
+    getLabelingSettings.mockResolvedValue({ autoLabelDocuments: false });
 
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/check-auth') {

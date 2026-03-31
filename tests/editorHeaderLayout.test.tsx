@@ -137,4 +137,56 @@ describe('Editor header layout', () => {
     expect(container.textContent).toContain('Export document');
     expect(container.textContent).toContain('Markdown (.md)');
   });
+
+  it('renames the document and refreshes the header title after persistence', async () => {
+    installMatchMedia({
+      '(max-width: 1023px)': false,
+      '(max-width: 1279px)': false,
+    });
+
+    const onPersistDocument = vi.fn(async (nextDoc: DocumentData) => nextDoc);
+
+    await act(async () => {
+      root.render(
+        <EditorView
+          doc={buildDocument('before-rename.pdf')}
+          onBack={vi.fn()}
+          onPersistDocument={onPersistDocument}
+          onRefreshDocument={vi.fn(async () => null)}
+          models={[]}
+          prompts={[]}
+          onOpenSettings={vi.fn()}
+        />
+      );
+    });
+
+    const renameButton = container.querySelector('button[aria-label="Rename"]') as HTMLButtonElement | null;
+    expect(renameButton).not.toBeNull();
+
+    await act(async () => {
+      renameButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const input = container.querySelector('[data-testid="rename-document-input"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+
+    await act(async () => {
+      if (input) {
+        const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        valueSetter?.call(input, 'after-rename.pdf');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    const saveButton = container.querySelector('button[aria-label="Save name"]') as HTMLButtonElement | null;
+    expect(saveButton).not.toBeNull();
+
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onPersistDocument).toHaveBeenCalledWith(expect.objectContaining({ name: 'after-rename.pdf' }));
+    expect(container.querySelector('[data-testid="editor-document-title"]')?.textContent).toContain('after-rename.pdf');
+  });
 });

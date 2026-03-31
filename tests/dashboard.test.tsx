@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import Dashboard from '../components/Dashboard';
 import type { DocumentData } from '../types';
 
+const DASHBOARD_MODELS = [
+  { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' },
+];
+
 const buildDocument = (overrides: Partial<DocumentData> = {}): DocumentData => ({
   id: 'doc-1',
   name: 'ocr-sample.pdf',
@@ -27,6 +31,7 @@ const renderDashboard = (items: DocumentData[]) =>
   renderToStaticMarkup(
     <Dashboard
       items={items}
+      models={DASHBOARD_MODELS}
       currentFolderId={null}
       onOpenDocument={vi.fn()}
       onNewUpload={vi.fn()}
@@ -34,6 +39,9 @@ const renderDashboard = (items: DocumentData[]) =>
       onNavigateFolder={vi.fn()}
       onDeleteItem={vi.fn()}
       onMoveItem={vi.fn()}
+      onRenameDocument={vi.fn(async () => {})}
+      onToggleDocumentRead={vi.fn(async () => {})}
+      onReprocessDocument={vi.fn(async () => {})}
     />
   );
 

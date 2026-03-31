@@ -51,6 +51,8 @@ export interface DocumentData extends FileSystemItem {
   pages: PageData[];
   status: 'uploading' | 'processing' | 'ready' | 'error';
   modelUsed: string;
+  isRead?: boolean;
+  labels?: string[];
   processingMode?: 'ocr' | 'translation' | 'manual';
   targetLanguage?: string;
   customPrompt?: string;
@@ -93,4 +95,8 @@ export interface PromptPreset {
   updatedAt?: number;
 }
 
-export type SettingsTab = 'models' | 'prompts';
+export interface LabelingSettings {
+  autoLabelDocuments: boolean;
+}
+
+export type SettingsTab = 'models' | 'prompts' | 'labeling';

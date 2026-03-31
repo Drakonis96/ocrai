@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ProcessingOptions, PromptPreset, SettingsTab } from '../types';
-import { DEFAULT_MODELS, GeminiModel } from '../utils/modelStorage';
+import { DEFAULT_MODEL_ID, GeminiModel, getPreferredDefaultModelId } from '../utils/modelStorage';
 import { FileIcon, TrashIcon, UploadCloudIcon } from './Icons';
 import ProcessingOptionsSelector from './ProcessingOptionsSelector';
 
@@ -10,8 +10,6 @@ interface UploadViewProps {
   prompts: PromptPreset[];
   onOpenSettings: (tab?: SettingsTab) => void;
 }
-
-const DEFAULT_MODEL_ID = DEFAULT_MODELS[0]?.id ?? 'gemini-flash-latest';
 
 const UploadView: React.FC<UploadViewProps> = ({
   onFileSelect,
@@ -43,7 +41,7 @@ const UploadView: React.FC<UploadViewProps> = ({
 
       return {
         ...current,
-        model: models[0]?.id ?? DEFAULT_MODEL_ID,
+        model: getPreferredDefaultModelId(models),
       };
     });
   }, [models]);

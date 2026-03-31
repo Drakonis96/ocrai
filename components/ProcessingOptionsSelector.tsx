@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ProcessingOptions, PromptPreset, SettingsTab } from '../types';
-import { DEFAULT_MODELS, GeminiModel } from '../utils/modelStorage';
+import { DEFAULT_MODEL_ID, GeminiModel, getPreferredDefaultModelId } from '../utils/modelStorage';
 import { SettingsIcon } from './Icons';
 
 interface ProcessingOptionsSelectorProps {
@@ -22,7 +22,6 @@ const LANGUAGES = [
   '日本語'
 ];
 
-const DEFAULT_MODEL_ID = DEFAULT_MODELS[0]?.id ?? 'gemini-flash-latest';
 const BATCH_SIZE_PRESETS = [1, 2, 5, 10, 15];
 
 const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
@@ -43,7 +42,7 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
 
     const modelStillAvailable = models.some((model) => model.id === options.model);
     if (!modelStillAvailable) {
-      onChange({ ...options, model: models[0]?.id ?? DEFAULT_MODEL_ID });
+      onChange({ ...options, model: getPreferredDefaultModelId(models) });
     }
   }, [models, onChange, options]);
 
@@ -226,6 +225,9 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
                 className="w-full rounded-2xl border border-slate-300 bg-white p-3 font-mono text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
                 placeholder="Enter your custom prompt here..."
               />
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                Custom prompts are appended to the built-in OCR rules. Paragraph reconstruction, hyphen handling, and column reading order always stay enforced.
+              </p>
             </div>
           </div>
         )}

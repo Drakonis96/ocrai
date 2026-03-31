@@ -5,10 +5,16 @@ export interface GeminiModel {
   isCustom?: boolean;
 }
 
+export const DEFAULT_MODEL_ID = 'gemini-flash-lite-latest';
+
 export const DEFAULT_MODELS: GeminiModel[] = [
+  { id: DEFAULT_MODEL_ID, name: 'Gemini Flash Lite Latest', description: 'Cheapest' },
   { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' },
-  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite Latest', description: 'Faster' },
 ];
+
+export const getPreferredDefaultModelId = (
+  models: Array<Pick<GeminiModel, 'id'>> = DEFAULT_MODELS
+) => models.find((model) => model.id === DEFAULT_MODEL_ID)?.id ?? models[0]?.id ?? DEFAULT_MODEL_ID;
 
 const API_BASE = '/api/models';
 

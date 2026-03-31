@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.3.0 - 2026-03-31
+
+### Added
+- New `Labeling` settings tab with automatic AI-based document labeling, label creation, and label management.
+- Manual document labels directly from the dashboard, including inline label chips under each title and a dedicated label picker modal.
+- Persistent read/unread state with quick checkbox toggles from the main document list.
+- Persistent document rename flows from both the dashboard and editor.
+- Functional dashboard pagination with configurable page sizes (`10`, `15`, `25`, `50`, `100`, `150`) and a floating scroll-to-top action.
+- New `Move` actions for folders and documents with destination picker modals.
+- Full-document `Reprocess` action from the dashboard with explicit model selection.
+
+### Changed
+- Standardized OCR prompting across processing and reprocessing so paragraph reconstruction, de-hyphenation, indentation-aware paragraph detection, and multi-column reading rules are enforced everywhere.
+- Switched the default processing model to `gemini-flash-lite-latest` throughout the app, while still honoring explicit user selection of the normal Flash model.
+- Updated settings navigation so the previous settings surface now lives under the `AI` tab and labeling has its own dedicated tab.
+- Improved the dashboard toolbar and mobile header layouts so primary controls stay aligned on small screens.
+
+### Fixed
+- Removed remaining `DocuClean AI` / `docucleanai` branding from user-visible outputs, including download/export metadata.
+- Ensured edited document names, read state, and labels remain preserved while background OCR processing is still running.
+- Made downloaded/exported content, manual prompts, and background processing flows respect the latest OCR reconstruction rules consistently.
+- Cleaned App-level test mocks so new labeling settings do not generate fetch errors during validation.
+
+### Testing
+- Added regression coverage for dashboard labeling, labeling settings, document-label preservation during background processing, and App polling with labeling-aware settings loads.
+- Verified the full automated suite (`45` tests), server syntax, and production build before release.
+
 ## v1.2.2 - 2026-03-25
 
 ### Fixed

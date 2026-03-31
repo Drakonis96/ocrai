@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it } from 'vitest';
+import JSZip from 'jszip';
 import { generateEPUB, generateHTML, generatePlainText } from '../utils/reconstruction';
 import { markdownToPlainText, markdownToRichTextHtml, richTextHtmlToMarkdown } from '../utils/richText';
 
@@ -57,5 +58,15 @@ describe('rich text helpers', () => {
 
     expect(epubBlob.type).toBe('application/epub+zip');
     expect(epubBlob.size).toBeGreaterThan(0);
+  });
+
+  it('uses ocrAI branding in epub metadata', async () => {
+    const epubBlob = await generateEPUB(SAMPLE_MARKDOWN, 'Sample');
+    const archive = await JSZip.loadAsync(await epubBlob.arrayBuffer());
+    const opfContent = await archive.file('OEBPS/content.opf')?.async('string');
+
+    expect(opfContent).toContain('<dc:creator opf:role="aut">ocrAI</dc:creator>');
+    expect(opfContent).not.toContain('DocuClean AI');
+    expect(opfContent).not.toContain('docucleanai');
   });
 });

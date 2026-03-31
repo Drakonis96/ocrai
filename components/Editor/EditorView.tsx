@@ -22,7 +22,8 @@ import {
 import { reprocessPage } from '../../services/geminiService';
 import ProcessingOptionsSelector from '../ProcessingOptionsSelector';
 import IconActionButton from '../IconActionButton';
-import { DEFAULT_MODELS, GeminiModel } from '../../utils/modelStorage';
+import DocumentNameDialog from '../DocumentNameDialog';
+import { DEFAULT_MODEL_ID, GeminiModel, getPreferredDefaultModelId } from '../../utils/modelStorage';
 import { getIssuePageIndexes, getPageIssueType } from '../../utils/pageReview';
 import { downloadBlob } from '../../utils/download';
 
@@ -41,8 +42,6 @@ type ReprocessScope = 'current' | 'issues';
 
 const MIN_EDITOR_WIDTH = 30;
 const MAX_EDITOR_WIDTH = 70;
-const DEFAULT_MODEL_ID = DEFAULT_MODELS[0]?.id ?? 'gemini-flash-latest';
-
 const EditorView: React.FC<EditorViewProps> = ({
   doc,
   onBack,
@@ -60,6 +59,10 @@ const EditorView: React.FC<EditorViewProps> = ({
   const [isSaved, setIsSaved] = useState(true);
   const [isSavingDocument, setIsSavingDocument] = useState(false);
   const [showCopyFeedback, setShowCopyFeedback] = useState(false);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(doc.name);
+  const [renameError, setRenameError] = useState('');
+  const [isRenamingDocument, setIsRenamingDocument] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [isUpdatingErrorDismissal, setIsUpdatingErrorDismissal] = useState(false);
   const [showReprocessModal, setShowReprocessModal] = useState(false);
@@ -130,6 +133,7 @@ const EditorView: React.FC<EditorViewProps> = ({
 
   useEffect(() => {
     setWorkingDoc(doc);
+    setRenameDraft(doc.name);
   }, [doc]);
 
   useEffect(() => {
@@ -162,7 +166,7 @@ const EditorView: React.FC<EditorViewProps> = ({
 
       return {
         ...current,
-        model: models[0]?.id ?? DEFAULT_MODEL_ID,
+        model: getPreferredDefaultModelId(models),
       };
     });
   }, [models]);
@@ -321,6 +325,48 @@ const EditorView: React.FC<EditorViewProps> = ({
     navigator.clipboard.writeText(workingDoc.name);
     setShowCopyFeedback(true);
     setTimeout(() => setShowCopyFeedback(false), 1000);
+  };
+
+  const handleOpenRenameDialog = () => {
+    setRenameDraft(workingDoc.name);
+    setRenameError('');
+    setShowRenameDialog(true);
+  };
+
+  const handleCloseRenameDialog = () => {
+    if (isRenamingDocument) {
+      return;
+    }
+
+    setShowRenameDialog(false);
+    setRenameError('');
+    setRenameDraft(workingDoc.name);
+  };
+
+  const handleRenameDocument = async () => {
+    const nextName = renameDraft.trim();
+    if (!nextName) {
+      setRenameError('Document name is required.');
+      return;
+    }
+
+    setIsRenamingDocument(true);
+
+    try {
+      const savedDoc = await onPersistDocument({
+        ...workingDoc,
+        name: nextName,
+      });
+      setWorkingDoc(savedDoc);
+      setRenameDraft(savedDoc.name);
+      setRenameError('');
+      setShowRenameDialog(false);
+    } catch (error: any) {
+      console.error('Rename failed', error);
+      setRenameError(error.message || 'Failed to rename document.');
+    } finally {
+      setIsRenamingDocument(false);
+    }
   };
 
   const applyRefreshedDocument = (nextDoc: DocumentData, overrides: Record<number, string> = pageTextOverrides) => {
@@ -835,6 +881,14 @@ const EditorView: React.FC<EditorViewProps> = ({
             className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:flex xl:flex-nowrap xl:items-center xl:justify-end"
           >
             <IconActionButton
+              icon={<EditIcon className="h-4 w-4" />}
+              label="Rename"
+              isActive={showRenameDialog}
+              className={headerActionButtonClassName}
+              onClick={handleOpenRenameDialog}
+            />
+
+            <IconActionButton
               icon={<CheckCircleIcon className="h-4 w-4" />}
               label={isSavingDocument ? 'Saving' : (isSaved ? 'Saved' : 'Save')}
               isActive={isSavingDocument || !isSaved}
@@ -990,6 +1044,16 @@ const EditorView: React.FC<EditorViewProps> = ({
           </div>
         )}
       </header>
+
+      <DocumentNameDialog
+        isOpen={showRenameDialog}
+        value={renameDraft}
+        error={renameError}
+        isSaving={isRenamingDocument}
+        onChange={setRenameDraft}
+        onClose={handleCloseRenameDialog}
+        onSubmit={handleRenameDocument}
+      />
 
       <div ref={contentRef} className={`relative flex-1 overflow-hidden ${isMobileLayout ? '' : 'flex'}`}>
         {isMobileLayout ? (

@@ -238,6 +238,122 @@ describe('document processing manager', () => {
     expect(stored.pages[1].status).toBe('error');
   });
 
+  it('preserves a renamed document name while background processing is still running', async () => {
+    const docId = 'doc-rename-during-processing';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    let releaseProcessing;
+    const processingStarted = new Promise((resolve) => {
+      releaseProcessing = resolve;
+    });
+    let continueProcessing;
+    const processingGate = new Promise((resolve) => {
+      continueProcessing = resolve;
+    });
+
+    const manager = createManager(dataDir, async ({ pageNumber }) => {
+      releaseProcessing();
+      await processingGate;
+      return createBlocks(pageNumber);
+    });
+
+    const processingTask = manager.processDocumentBackground(docId);
+    await processingStarted;
+
+    const renamedMetadata = await readMetadata(docDir);
+    renamedMetadata.name = 'renamed-while-processing.pdf';
+    await fs.writeFile(path.join(docDir, 'metadata.json'), JSON.stringify(renamedMetadata, null, 2));
+
+    continueProcessing();
+    await processingTask;
+
+    const stored = await readMetadata(docDir);
+    expect(stored.name).toBe('renamed-while-processing.pdf');
+    expect(stored.status).toBe('ready');
+  });
+
+  it('preserves read status changes while background processing is still running', async () => {
+    const docId = 'doc-read-during-processing';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    metadata.isRead = false;
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    let releaseProcessing;
+    const processingStarted = new Promise((resolve) => {
+      releaseProcessing = resolve;
+    });
+    let continueProcessing;
+    const processingGate = new Promise((resolve) => {
+      continueProcessing = resolve;
+    });
+
+    const manager = createManager(dataDir, async ({ pageNumber }) => {
+      releaseProcessing();
+      await processingGate;
+      return createBlocks(pageNumber);
+    });
+
+    const processingTask = manager.processDocumentBackground(docId);
+    await processingStarted;
+
+    const latestMetadata = await readMetadata(docDir);
+    latestMetadata.isRead = true;
+    await fs.writeFile(path.join(docDir, 'metadata.json'), JSON.stringify(latestMetadata, null, 2));
+
+    continueProcessing();
+    await processingTask;
+
+    const stored = await readMetadata(docDir);
+    expect(stored.isRead).toBe(true);
+    expect(stored.status).toBe('ready');
+  });
+
+  it('preserves label changes while background processing is still running', async () => {
+    const docId = 'doc-labels-during-processing';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    metadata.labels = ['Finance'];
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    let releaseProcessing;
+    const processingStarted = new Promise((resolve) => {
+      releaseProcessing = resolve;
+    });
+    let continueProcessing;
+    const processingGate = new Promise((resolve) => {
+      continueProcessing = resolve;
+    });
+
+    const manager = createManager(dataDir, async ({ pageNumber }) => {
+      releaseProcessing();
+      await processingGate;
+      return createBlocks(pageNumber);
+    });
+
+    const processingTask = manager.processDocumentBackground(docId);
+    await processingStarted;
+
+    const latestMetadata = await readMetadata(docDir);
+    latestMetadata.labels = ['Finance', 'Urgent'];
+    await fs.writeFile(path.join(docDir, 'metadata.json'), JSON.stringify(latestMetadata, null, 2));
+
+    continueProcessing();
+    await processingTask;
+
+    const stored = await readMetadata(docDir);
+    expect(stored.labels).toEqual(['Finance', 'Urgent']);
+    expect(stored.status).toBe('ready');
+  });
+
   it.each([1, 2, 5, 10])('processes pages in parallel up to pagesPerBatch=%s without duplicate attempts', async (pagesPerBatch) => {
     const docId = `doc-batch-${pagesPerBatch}`;
     const pageCount = 10;

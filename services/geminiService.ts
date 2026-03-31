@@ -1,7 +1,5 @@
-import { TextBlock, ProcessingOptions } from "../types";
-import { DEFAULT_MODELS } from "../utils/modelStorage";
-
-const DEFAULT_MODEL_ID = DEFAULT_MODELS[0]?.id ?? 'gemini-flash-latest';
+import { DocumentData, TextBlock, ProcessingOptions } from "../types";
+import { DEFAULT_MODEL_ID } from "../utils/modelStorage";
 
 const processPageWithGemini = async (
   base64Image: string,
@@ -157,4 +155,32 @@ const reprocessPage = async (
   }
 };
 
-export { processPageWithGemini, generateAppLogo, getSavedPrompts, savePrompt, reprocessPage };
+const reprocessDocument = async (
+  docId: string,
+  modelName: string = DEFAULT_MODEL_ID
+): Promise<DocumentData> => {
+  try {
+    const response = await fetch('/api/reprocess-document', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        docId,
+        modelName,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.error || 'Failed to reprocess document on server');
+    }
+
+    return response.json();
+  } catch (error: any) {
+    console.error('Gemini Service Error:', error);
+    throw new Error(error.message || 'Failed to reprocess document');
+  }
+};
+
+export { processPageWithGemini, generateAppLogo, getSavedPrompts, savePrompt, reprocessPage, reprocessDocument };

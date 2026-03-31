@@ -4,83 +4,97 @@
 
 # ocrAI
 
-ocrAI is a document cleanup and note-taking assistant. Upload PDFs or images, let Gemini OCR extract page content with layout-aware blocks, and review the cleaned text inside a simple editor. Documents, folders, and exportable notes are stored locally on the server so you can organize and download everything in one place.
+ocrAI is a document cleanup and note-taking workspace. Upload PDFs or images, run Gemini-powered OCR, review the extracted content in a built-in editor, organize documents into folders, label them, and export the cleaned output in multiple formats.
+
+## Highlights
+- Authentication-protected workspace
+- OCR, translation, and manual extraction flows
+- Shared OCR prompt rules for paragraph reconstruction, de-hyphenation, and multi-column reading order
+- Rich text editor with per-page and full-document reprocessing
+- Persistent folders, document renaming, read/unread state, and labels
+- Automatic AI-based labeling from document names
+- TXT, HTML, EPUB, PDF, and ZIP export flows
+
+## Processing model defaults
+- The default processing model is `gemini-flash-lite-latest`.
+- If the user explicitly selects the normal Flash model, that selection is respected for processing and reprocessing.
 
 ## How it works
-- **Upload & ingestion**: From the dashboard you can create folders, upload PDFs or images, and pick the Gemini model used for OCR. PDFs are converted to page images in the browser before being sent to the backend.
-- **Background processing**: The backend queues each document for processing, saves page images under `data/<docId>`, and calls the configured Gemini model (`gemini-2.5-flash` by default) to produce labeled text blocks for every page.
-- **Editing & export**: Open a processed document to view or tweak the reconstructed text (including headers, captions, and footnotes). You can export all ready documents as a ZIP of `.txt` files or download individual markdown files generated per page under `data/<docId>`.
-- **Storage model**: All metadata and generated files live under the `data/` directory (one subfolder per document) alongside a `metadata.json` file that tracks status, pages, and saved edits.
+1. Upload a PDF or image from the dashboard.
+2. The backend stores page images and metadata under `data/<docId>/`.
+3. Gemini extracts layout-aware text blocks for each page.
+4. ocrAI reconstructs readable document text while preserving true paragraph structure instead of visual line wrapping.
+5. You can review, rename, label, move, reprocess, and export the final document.
 
-## Features
-- **Authentication**: Secure login system to protect your documents
-- **Document processing**: AI-powered OCR using Google's Gemini models
-- **Editing & organization**: Review and edit extracted text in a built-in editor
-- **Export capabilities**: Download documents individually or as a ZIP archive
-## Local development with Vite
-1. Install dependencies: `npm install`.
-2. Create `.env.local` with your API key and login credentials:
-   ```env
-   GEMINI_API_KEY=your-gemini-api-key-here
-   ADMIN_USERNAME=your-username
-   ADMIN_PASSWORD=your-password
-   ```
-3. Start the Vite dev server and API in one step:
 ## Configuration
-Create a `.env.local` file in the root directory with the following variables:
+Create a `.env.local` file in the project root:
 
 ```env
-# Gemini API Key (required)
 GEMINI_API_KEY=your-gemini-api-key-here
-
-# Authentication credentials (required)
 ADMIN_USERNAME=your-username
 ADMIN_PASSWORD=your-password
 ```
 
-**Important**: Keep your `.env.local` file secure and never commit it to version control.
+Keep `.env.local` out of version control.
 
-## Local development with Vite
-1. Install dependencies: `npm install`.
-2. Create `.env.local` with your API key:
+## Local development
+1. Install dependencies:
+
+   ```bash
+   npm install
    ```
-   GEMINI_API_KEY=your-key-here
-   ```
+
+2. Start the app:
+
+   ```bash
    npm run dev
    ```
-   - Vite serves the React UI.
-   - The Express server (`server.js`) proxies Gemini requests and persists uploads under `data/`.
-4. Open the app at the URL printed by Vite (typically `http://localhost:5173`).
-5. Log in using the credentials you set in `.env.local`.
-   - The Express server (`server.js`) proxies Gemini requests and persists uploads under `data/`.
-4. Open the app at the URL printed by Vite (typically `http://localhost:5173`).
+
+3. Open the URL shown by Vite, usually `http://localhost:5173`.
 
 ## Production build
-1. Build the frontend: `npm run build`.
-2. Start the bundled server that serves the built assets and API on port `5037`:
-   ```
-   npm start
-   ```
-### Build and run
+Build the frontend and run the bundled server:
+
 ```bash
-docker build -t ocrai .
-docker run -p 5037:5037 --env-file .env.local -v $(pwd)/data:/app/data ocrai
+npm run build
+npm start
+```
+
+The production server listens on port `5037`.
+
+## Docker
+
+### Build locally
 ```bash
-docker build -t docuclean-ai .
-docker run -p 5037:5037 --env-file .env.local -v $(pwd)/data:/app/data docuclean-ai
+docker build -t drakonis96/ocrai:local .
+docker run -p 5037:5037 --env-file .env.local -v "$(pwd)/data:/app/data" drakonis96/ocrai:local
+```
+
+### Use Docker Compose
 ```bash
 docker compose up --build
 ```
-- Exposes the app on port `5037`.
-- Binds `./data` on the host for persistent storage.
-- Mounts `.env.local` so `GEMINI_API_KEY`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD` are available inside the container.
-- Restarts automatically unless stopped.
-- Binds `./data` on the host for persistent storage.
-- Mounts `.env.local` so `GEMINI_API_KEY` is available inside the container.
-- Restarts automatically unless stopped.
+
+### Pull the published image
+```bash
+docker pull drakonis96/ocrai:latest
+```
+
+## Testing
+Run the full automated suite:
+
+```bash
+npm test
+```
+
+Run a production build check:
+
+```bash
+npm run build
+```
+
 ## Troubleshooting
-- **Cannot log in**: Verify that `ADMIN_USERNAME` and `ADMIN_PASSWORD` are correctly set in `.env.local`.
-- **Uploads never finish**: Confirm `GEMINI_API_KEY` is set and the key has access to the selected Gemini models.
-- **Storage issues**: Ensure the `data/` directory exists and is writable so the server can store images, markdown, and metadata.
-- **Environment variables not loading**: Make sure `.env.local` is in the root directory and properly formatted.ls.
-- Ensure the `data/` directory exists and is writable so the server can store images, markdown, and metadata.
+- Cannot log in: verify `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+- Uploads never finish: verify `GEMINI_API_KEY` and Gemini model access.
+- Storage issues: ensure `data/` exists and is writable.
+- Docker issues: confirm `.env.local` is mounted and port `5037` is available.

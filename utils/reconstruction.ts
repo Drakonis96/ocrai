@@ -142,7 +142,7 @@ export const generateEPUB = async (text: string, title: string): Promise<Blob> =
       <dc:title>${title}</dc:title>
       <dc:language>en</dc:language>
       <dc:identifier id="BookId" opf:scheme="UUID">${uniqueId}</dc:identifier>
-      <dc:creator opf:role="aut">DocuClean AI</dc:creator>
+      <dc:creator opf:role="aut">ocrAI</dc:creator>
    </metadata>
    <manifest>
       <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>

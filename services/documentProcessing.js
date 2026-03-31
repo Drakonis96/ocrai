@@ -279,7 +279,42 @@ export const createDocumentProcessingManager = ({
       docData.status = 'processing';
 
       let metadataWriteQueue = Promise.resolve();
+      const syncUserManagedMetadata = async () => {
+        try {
+          if (!fs.existsSync(metadataPath)) {
+            return;
+          }
+
+          const latestMetadata = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+          if (typeof latestMetadata?.name === 'string' && latestMetadata.name.trim()) {
+            docData.name = latestMetadata.name.trim();
+          }
+
+          if (latestMetadata?.parentId === null || typeof latestMetadata?.parentId === 'string') {
+            docData.parentId = latestMetadata.parentId;
+          }
+
+          docData.isRead = latestMetadata?.isRead === true;
+          docData.labels = Array.isArray(latestMetadata?.labels) ? latestMetadata.labels : [];
+
+          if (typeof latestMetadata?.savedText === 'string') {
+            docData.savedText = latestMetadata.savedText;
+          } else {
+            delete docData.savedText;
+          }
+
+          if (latestMetadata?.pageSavedTexts && typeof latestMetadata.pageSavedTexts === 'object' && !Array.isArray(latestMetadata.pageSavedTexts)) {
+            docData.pageSavedTexts = latestMetadata.pageSavedTexts;
+          } else {
+            delete docData.pageSavedTexts;
+          }
+        } catch (error) {
+          logger.warn(`Failed to sync latest metadata for ${docId}: ${error.message}`);
+        }
+      };
+
       const persistMetadata = async () => {
+        await syncUserManagedMetadata();
         normalizeDocumentRuntimeState(docData);
         if (documentNeedsBackgroundProcessing(docData)) {
           docData.status = 'processing';

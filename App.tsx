@@ -17,13 +17,21 @@ import {
   SunIcon,
   TrashIcon,
 } from './components/Icons';
-import { AppView, DocumentData, FileSystemItem, FolderData, ProcessingOptions, PromptPreset, SettingsTab } from './types';
+import { AppView, DocumentData, FileSystemItem, FolderData, LabelingSettings, ProcessingOptions, PromptPreset, SettingsTab } from './types';
 import { reconstructCleanText } from './utils/reconstruction';
 import { markdownToPlainText } from './utils/richText';
 import { deleteItem, getAllItems, nukeDB, saveItem } from './utils/storage';
 import { MOCK_ID_PREFIX } from './constants';
 import { addModel, DEFAULT_MODELS, GeminiModel, getModels, removeModel } from './utils/modelStorage';
 import { createPrompt, deletePrompt, getPrompts, updatePrompt } from './services/promptService';
+import {
+  createLabel,
+  deleteLabel,
+  getLabelingSettings,
+  getLabels,
+  updateLabelingSettings,
+} from './services/labelingService';
+import { reprocessDocument } from './services/geminiService';
 import { getPdfRenderConcurrency } from './utils/pdfProcessing';
 import { downloadBlob } from './utils/download';
 // @ts-ignore
@@ -95,6 +103,8 @@ const App: React.FC = () => {
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>('models');
   const [models, setModels] = useState<GeminiModel[]>(DEFAULT_MODELS);
   const [prompts, setPrompts] = useState<PromptPreset[]>([]);
+  const [availableLabels, setAvailableLabels] = useState<string[]>([]);
+  const [labelingSettings, setLabelingSettings] = useState<LabelingSettings>({ autoLabelDocuments: false });
   const itemsRef = useRef<FileSystemItem[]>([]);
 
   const loadItems = useCallback(async (
@@ -120,13 +130,22 @@ const App: React.FC = () => {
 
   const loadSettings = useCallback(async () => {
     try {
-      const [availableModels, savedPrompts] = await Promise.all([getModels(), getPrompts()]);
+      const [availableModels, savedPrompts, labels, nextLabelingSettings] = await Promise.all([
+        getModels(),
+        getPrompts(),
+        getLabels(),
+        getLabelingSettings(),
+      ]);
       setModels(availableModels);
       setPrompts(savedPrompts);
+      setAvailableLabels(labels);
+      setLabelingSettings(nextLabelingSettings);
     } catch (error) {
       console.error('Failed to load settings', error);
       setModels(DEFAULT_MODELS);
       setPrompts([]);
+      setAvailableLabels([]);
+      setLabelingSettings({ autoLabelDocuments: false });
     }
   }, []);
 
@@ -243,6 +262,32 @@ const App: React.FC = () => {
     setPrompts(updatedPrompts);
   };
 
+  const handleCreateLabel = async (labelName: string) => {
+    const updatedLabels = await createLabel(labelName);
+    setAvailableLabels(updatedLabels);
+  };
+
+  const handleDeleteLabel = async (labelName: string) => {
+    const updatedLabels = await deleteLabel(labelName);
+    setAvailableLabels(updatedLabels);
+    setItems((current) => current.map((entry) => {
+      if (entry.type !== 'file') {
+        return entry;
+      }
+
+      const document = entry as DocumentData;
+      return {
+        ...document,
+        labels: (document.labels ?? []).filter((label) => label.toLowerCase() !== labelName.toLowerCase()),
+      };
+    }));
+  };
+
+  const handleUpdateLabelingSettings = async (nextSettings: LabelingSettings) => {
+    const updatedSettings = await updateLabelingSettings(nextSettings);
+    setLabelingSettings(updatedSettings);
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -354,18 +399,98 @@ const App: React.FC = () => {
 
   const handleMoveItem = useCallback(async (itemId: string, targetFolderId: string | null) => {
     if (itemId === targetFolderId) {
+      throw new Error('Cannot move an item into itself.');
+    }
+
+    const currentItems = itemsRef.current;
+    const item = currentItems.find((entry) => entry.id === itemId);
+    if (!item) {
+      throw new Error('Item not found.');
+    }
+
+    if (item.parentId === targetFolderId) {
       return;
     }
 
-    const item = itemsRef.current.find((entry) => entry.id === itemId);
-    if (!item) {
-      return;
+    if (targetFolderId !== null) {
+      const targetFolder = currentItems.find((entry) => entry.id === targetFolderId && entry.type === 'folder');
+      if (!targetFolder) {
+        throw new Error('Destination folder not found.');
+      }
+    }
+
+    if (item.type === 'folder' && targetFolderId !== null) {
+      let currentParentId: string | null = targetFolderId;
+
+      while (currentParentId) {
+        if (currentParentId === itemId) {
+          throw new Error('Cannot move a folder into itself or one of its subfolders.');
+        }
+
+        const parentFolder = currentItems.find((entry) => entry.id === currentParentId && entry.type === 'folder');
+        currentParentId = parentFolder?.parentId ?? null;
+      }
     }
 
     const updatedItem = { ...item, parentId: targetFolderId };
-    await saveItem(updatedItem);
-    setItems((current) => current.map((entry) => (entry.id === itemId ? updatedItem : entry)));
+    const savedItem = await saveItem(updatedItem);
+    setItems((current) => current.map((entry) => (entry.id === itemId ? savedItem : entry)));
   }, []);
+
+  const handleToggleDocumentRead = useCallback(async (docId: string, isRead: boolean) => {
+    const currentDoc = itemsRef.current.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
+    if (!currentDoc) {
+      throw new Error('Document not found.');
+    }
+
+    if ((currentDoc.isRead ?? false) === isRead) {
+      return;
+    }
+
+    const optimisticDoc: DocumentData = {
+      ...currentDoc,
+      isRead,
+    };
+
+    setItems((current) => current.map((entry) => (entry.id === docId ? optimisticDoc : entry)));
+
+    try {
+      const savedDoc = await saveItem(optimisticDoc) as DocumentData;
+      setItems((current) => current.map((entry) => (entry.id === savedDoc.id ? savedDoc : entry)));
+    } catch (error) {
+      setItems((current) => current.map((entry) => (entry.id === currentDoc.id ? currentDoc : entry)));
+      throw error;
+    }
+  }, []);
+
+  const handleUpdateDocumentLabels = useCallback(async (docId: string, nextLabels: string[]) => {
+    const currentDoc = itemsRef.current.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
+    if (!currentDoc) {
+      throw new Error('Document not found.');
+    }
+
+    const normalizedLabels = Array.from(new Set(
+      nextLabels
+        .map((label) => label.trim())
+        .filter((label) => label.length > 0)
+        .filter((label) => availableLabels.some((availableLabel) => availableLabel.toLowerCase() === label.toLowerCase()))
+    ));
+
+    const optimisticDoc: DocumentData = {
+      ...currentDoc,
+      labels: normalizedLabels,
+    };
+
+    setItems((current) => current.map((entry) => (entry.id === docId ? optimisticDoc : entry)));
+
+    try {
+      const savedDoc = await saveItem(optimisticDoc) as DocumentData;
+      setItems((current) => current.map((entry) => (entry.id === savedDoc.id ? savedDoc : entry)));
+    } catch (error) {
+      setItems((current) => current.map((entry) => (entry.id === currentDoc.id ? currentDoc : entry)));
+      throw error;
+    }
+  }, [availableLabels]);
 
   const handleDeleteAll = async () => {
     await nukeDB(!deleteIncludeFolders);
@@ -420,6 +545,8 @@ const App: React.FC = () => {
           uploadDate: Date.now(),
           status: 'processing',
           modelUsed: options.model,
+          isRead: false,
+          labels: [],
           processingMode: options.processingMode,
           targetLanguage: options.targetLanguage,
           customPrompt: options.customPrompt,
@@ -470,6 +597,25 @@ const App: React.FC = () => {
     return savedDoc;
   }, []);
 
+  const handleRenameDocument = useCallback(async (docId: string, nextName: string) => {
+    const normalizedName = nextName.trim();
+    if (!normalizedName) {
+      throw new Error('Document name is required.');
+    }
+
+    const currentDoc = itemsRef.current.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
+    if (!currentDoc) {
+      throw new Error('Document not found.');
+    }
+
+    const savedDoc = await saveItem({
+      ...currentDoc,
+      name: normalizedName,
+    }) as DocumentData;
+
+    setItems((current) => current.map((entry) => (entry.id === savedDoc.id ? savedDoc : entry)));
+  }, []);
+
   const handleRefreshDocument = useCallback(async (docId: string) => {
     const data = await getAllItems();
     const refreshedDoc = data.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
@@ -477,6 +623,20 @@ const App: React.FC = () => {
       setItems((current) => reconcileItems(current, data));
     });
     return refreshedDoc ?? null;
+  }, []);
+
+  const handleReprocessDocument = useCallback(async (docId: string, modelName: string) => {
+    const currentDoc = itemsRef.current.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
+    if (!currentDoc) {
+      throw new Error('Document not found.');
+    }
+
+    if (currentDoc.status === 'processing' || currentDoc.status === 'uploading') {
+      throw new Error('Document is already processing.');
+    }
+
+    const updatedDoc = await reprocessDocument(docId, modelName);
+    setItems((current) => current.map((entry) => (entry.id === updatedDoc.id ? updatedDoc : entry)));
   }, []);
 
   const goToHome = () => {
@@ -501,19 +661,19 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen w-screen flex-col bg-slate-50 text-slate-900 transition-colors duration-200 dark:bg-slate-900 dark:text-slate-100">
       <nav className="shrink-0 border-b border-slate-200 bg-white shadow-sm transition-colors duration-200 dark:border-slate-700 dark:bg-slate-800">
-        <div className="grid gap-3 px-4 py-3 sm:px-6 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
-          <button className="flex items-center gap-3 text-left lg:justify-self-start" onClick={goToHome}>
+        <div className="grid min-h-[5rem] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 sm:px-6">
+          <button className="flex min-w-0 items-center gap-3 text-left" onClick={goToHome}>
             <img src="/logo.png" alt="ocrAI logo" className="h-10 w-10 rounded-2xl shadow-sm" />
-            <div>
-              <span className="block text-xl font-bold tracking-tight text-slate-800 dark:text-white">ocrAI</span>
-              <span className="block text-xs uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
+            <div className="min-w-0">
+              <span className="block truncate text-lg font-bold tracking-tight text-slate-800 dark:text-white sm:text-xl">ocrAI</span>
+              <span className="block truncate text-[10px] uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500 sm:text-xs">
                 Workspace
               </span>
             </div>
           </button>
 
-          <div className="overflow-x-auto lg:justify-self-center lg:overflow-visible">
-            <div className="flex min-w-max items-center justify-center gap-2 pb-1 lg:min-w-0 lg:pb-0">
+          <div className="min-w-0 justify-self-center overflow-x-auto">
+            <div className="mx-auto flex min-w-max items-center justify-center gap-2">
               <IconActionButton
                 icon={<SettingsIcon className="h-4 w-4" />}
                 label="Settings"
@@ -550,7 +710,7 @@ const App: React.FC = () => {
           <button
             type="button"
             onClick={toggleTheme}
-            className="relative ml-auto flex h-11 w-16 items-center rounded-full bg-slate-200 p-1 transition-colors duration-300 dark:bg-slate-700 lg:justify-self-end"
+            className="relative flex h-11 w-16 shrink-0 items-center justify-self-end rounded-full bg-slate-200 p-1 transition-colors duration-300 dark:bg-slate-700"
             title="Toggle dark mode"
             aria-label="Toggle dark mode"
           >
@@ -590,6 +750,8 @@ const App: React.FC = () => {
             {currentView === AppView.DASHBOARD && (
               <Dashboard
                 items={items}
+                models={models}
+                availableLabels={availableLabels}
                 currentFolderId={currentFolderId}
                 onOpenDocument={handleOpenDocument}
                 onNewUpload={handleNewUpload}
@@ -597,6 +759,11 @@ const App: React.FC = () => {
                 onNavigateFolder={setCurrentFolderId}
                 onDeleteItem={handleRequestDelete}
                 onMoveItem={handleMoveItem}
+                onRenameDocument={handleRenameDocument}
+                onToggleDocumentRead={handleToggleDocumentRead}
+                onUpdateDocumentLabels={handleUpdateDocumentLabels}
+                onReprocessDocument={handleReprocessDocument}
+                onOpenSettings={openSettings}
               />
             )}
 
@@ -708,11 +875,16 @@ const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         models={models}
         prompts={prompts}
+        availableLabels={availableLabels}
+        labelingSettings={labelingSettings}
         onAddModel={handleAddModel}
         onRemoveModel={handleRemoveModel}
         onCreatePrompt={handleCreatePrompt}
         onUpdatePrompt={handleUpdatePrompt}
         onDeletePrompt={handleDeletePrompt}
+        onCreateLabel={handleCreateLabel}
+        onDeleteLabel={handleDeleteLabel}
+        onUpdateLabelingSettings={handleUpdateLabelingSettings}
       />
     </div>
   );

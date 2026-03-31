@@ -1,5 +1,5 @@
 {
-  "name": "DocuClean AI",
+  "name": "ocrAI",
   "description": "Intelligent document transcription and cleanup using Gemini Vision. Upload documents, extract clean text, and export formatted content.",
   "requestFramePermissions": []
 }
