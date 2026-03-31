@@ -42,7 +42,7 @@ const LABEL_EXPANDED_CLASSES =
   'max-w-[10rem] opacity-100 ml-2';
 
 const LABEL_COLLAPSED_CLASSES =
-  'max-w-0 opacity-0 ml-0 group-hover:max-w-[10rem] group-hover:opacity-100 group-hover:ml-2 group-focus-visible:max-w-[10rem] group-focus-visible:opacity-100 group-focus-visible:ml-2';
+  'max-w-0 opacity-0 ml-0 group-hover/icon-action:max-w-[10rem] group-hover/icon-action:opacity-100 group-hover/icon-action:ml-2 group-focus-within/icon-action:max-w-[10rem] group-focus-within/icon-action:opacity-100 group-focus-within/icon-action:ml-2';
 
 const IconActionButton: React.FC<IconActionButtonProps> = ({
   icon,
@@ -64,7 +64,7 @@ const IconActionButton: React.FC<IconActionButtonProps> = ({
       disabled={disabled}
       aria-label={label}
       className={[
-        'group inline-flex items-center justify-center rounded-full border shadow-sm transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50',
+        'group/icon-action inline-flex items-center justify-center rounded-full border shadow-sm transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50',
         SIZE_CLASSES[size],
         interactiveClasses,
         className,

@@ -625,7 +625,7 @@ const App: React.FC = () => {
     return refreshedDoc ?? null;
   }, []);
 
-  const handleReprocessDocument = useCallback(async (docId: string, modelName: string) => {
+  const handleReprocessDocument = useCallback(async (docId: string, modelName: string, pagesPerBatch: number) => {
     const currentDoc = itemsRef.current.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
     if (!currentDoc) {
       throw new Error('Document not found.');
@@ -635,7 +635,11 @@ const App: React.FC = () => {
       throw new Error('Document is already processing.');
     }
 
-    const updatedDoc = await reprocessDocument(docId, modelName);
+    const normalizedPagesPerBatch = Number.isInteger(pagesPerBatch) && pagesPerBatch > 0
+      ? pagesPerBatch
+      : (Number.isInteger(currentDoc.pagesPerBatch) && (currentDoc.pagesPerBatch ?? 0) > 0 ? currentDoc.pagesPerBatch ?? 1 : 1);
+
+    const updatedDoc = await reprocessDocument(docId, modelName, normalizedPagesPerBatch);
     setItems((current) => current.map((entry) => (entry.id === updatedDoc.id ? updatedDoc : entry)));
   }, []);
 

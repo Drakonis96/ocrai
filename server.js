@@ -793,7 +793,7 @@ app.post('/api/reprocess-page', async (req, res) => {
 });
 
 app.post('/api/reprocess-document', async (req, res) => {
-  const { docId, modelName } = req.body;
+  const { docId, modelName, pagesPerBatch } = req.body;
 
   try {
     const safeDocId = assertDocumentId(docId);
@@ -826,6 +826,7 @@ app.post('/api/reprocess-document', async (req, res) => {
     }
 
     docData.modelUsed = nextModelName || DEFAULT_MODEL_ID;
+    docData.pagesPerBatch = getPagesPerBatch(pagesPerBatch, docData.pagesPerBatch);
     if (docData.labels.length === 0) {
       const labelingSettings = await readLabelingSettings();
       if (labelingSettings.autoLabelDocuments && availableLabels.length > 0) {

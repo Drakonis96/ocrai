@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import type { GeminiModel } from '../utils/modelStorage';
 import IconActionButton from './IconActionButton';
 import { CloseIcon, RefreshCwIcon } from './Icons';
+
+const BATCH_SIZE_PRESETS = [1, 2, 5, 10, 15];
 
 interface ReprocessDocumentDialogProps {
   isOpen: boolean;
@@ -9,9 +11,11 @@ interface ReprocessDocumentDialogProps {
   pageCount: number;
   models: GeminiModel[];
   selectedModelId: string;
+  selectedPagesPerBatch: number;
   error: string;
   isSubmitting: boolean;
   onChangeModel: (modelId: string) => void;
+  onChangePagesPerBatch: (pagesPerBatch: number) => void;
   onClose: () => void;
   onSubmit: () => void;
 }
@@ -22,15 +26,30 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
   pageCount,
   models,
   selectedModelId,
+  selectedPagesPerBatch,
   error,
   isSubmitting,
   onChangeModel,
+  onChangePagesPerBatch,
   onClose,
   onSubmit,
 }) => {
+  const [batchSizeChoice, setBatchSizeChoice] = useState('1');
+
+  useEffect(() => {
+    const normalizedBatchSize = Number.isInteger(selectedPagesPerBatch) && selectedPagesPerBatch > 0
+      ? selectedPagesPerBatch
+      : 1;
+    setBatchSizeChoice(BATCH_SIZE_PRESETS.includes(normalizedBatchSize) ? String(normalizedBatchSize) : 'custom');
+  }, [selectedPagesPerBatch]);
+
   if (!isOpen) {
     return null;
   }
+
+  const normalizedBatchSize = Number.isInteger(selectedPagesPerBatch) && selectedPagesPerBatch > 0
+    ? selectedPagesPerBatch
+    : 1;
 
   return (
     <div
@@ -67,6 +86,45 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
               </option>
             ))}
           </select>
+        </label>
+
+        <label className="mt-4 block">
+          <span className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Pages Processed At Once</span>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)]">
+            <select
+              value={batchSizeChoice}
+              onChange={(event) => {
+                const value = event.target.value;
+                setBatchSizeChoice(value);
+                if (value !== 'custom') {
+                  onChangePagesPerBatch(Number(value));
+                }
+              }}
+              className="w-full rounded-2xl border border-slate-300 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+            >
+              {BATCH_SIZE_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {preset}
+                </option>
+              ))}
+              <option value="custom">Custom</option>
+            </select>
+
+            {batchSizeChoice === 'custom' && (
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={normalizedBatchSize}
+                onChange={(event) => onChangePagesPerBatch(Math.max(1, Math.trunc(Number(event.target.value) || 1)))}
+                className="w-full rounded-2xl border border-slate-300 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                placeholder="Pages"
+              />
+            )}
+          </div>
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            Full-document reprocessing will process this many pages in parallel.
+          </p>
         </label>
 
         {error && (

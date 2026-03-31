@@ -11,8 +11,11 @@ describe('ocr prompt builder', () => {
     expect(OCR_LAYOUT_PROMPT).toContain('JOIN WRAPPED LINES NATURALLY');
     expect(OCR_LAYOUT_PROMPT).toContain('RECONSTRUCT HYPHENATED WORDS');
     expect(OCR_LAYOUT_PROMPT).toContain('SINGLE-COLUMN REWRITE OF THE TEXT');
-    expect(OCR_LAYOUT_PROMPT).toContain('PARAGRAPH DETECTION');
-    expect(OCR_LAYOUT_PROMPT).toContain('MULTI-COLUMN READING ORDER');
+    expect(OCR_LAYOUT_PROMPT).toContain('INDENTATION DEFINES PARAGRAPHS');
+    expect(OCR_LAYOUT_PROMPT).toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
+    expect(OCR_LAYOUT_PROMPT).toContain('DO NOT CROSS COLUMN GUTTERS');
+    expect(OCR_LAYOUT_PROMPT).toContain('Never merge an indented line into the previous paragraph.');
+    expect(OCR_LAYOUT_PROMPT).toContain('finish the entire leftmost column from top to bottom');
     expect(OCR_LAYOUT_PROMPT).toContain('set "blankPage" to true');
     expect(OCR_LAYOUT_PROMPT).toContain('The text must remain in the original language of the document.');
   });
@@ -33,7 +36,7 @@ describe('ocr prompt builder', () => {
     expect(prompt).toContain('Extract the text and translate it into Español');
     expect(prompt).toContain('The text must be in Español.');
     expect(prompt).toContain('REAL PARAGRAPH BREAKS ONLY');
-    expect(prompt).toContain('MULTI-COLUMN READING ORDER');
+    expect(prompt).toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
   });
 
   it('treats manual prompts as additive instructions instead of replacing the OCR rules', () => {
@@ -49,6 +52,7 @@ describe('ocr prompt builder', () => {
     expect(prompt).toContain('These instructions are additive only.');
     expect(prompt).toContain('REAL PARAGRAPH BREAKS ONLY');
     expect(prompt).toContain('RECONSTRUCT HYPHENATED WORDS');
-    expect(prompt).toContain('MULTI-COLUMN READING ORDER');
+    expect(prompt).toContain('INDENTATION DEFINES PARAGRAPHS');
+    expect(prompt).toContain('MULTI-COLUMN READING ORDER IS MANDATORY');
   });
 });

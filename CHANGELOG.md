@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.1 - 2026-03-31
+
+### Added
+- Added the same `Pages Processed At Once` selector to full-document reprocessing that is already available during new uploads, so users can choose the parallel page batch size before restarting a document.
+
+### Fixed
+- Limited expandable button labels so only the hovered or focused button reveals its text, preventing document-list rows and other grouped toolbars from expanding every action label at once.
+- Strengthened OCR instructions for multi-column layouts so left-to-right column reading is treated as mandatory, column gutters are not crossed, and adjacent columns are not merged into one paragraph flow.
+- Strengthened OCR paragraph detection so visible first-line indentation is treated as a decisive new-paragraph signal instead of being merged into the previous paragraph.
+
+### Testing
+- Added regression coverage for the full-document reprocess modal batch-size selector, scoped action-button label expansion, and the strengthened OCR prompt rules.
+- Verified the full automated suite (`46` tests), server syntax, and production build before release.
+
 ## v1.3.0 - 2026-03-31
 
 ### Added

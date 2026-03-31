@@ -71,14 +71,15 @@ You are a highly advanced Document Layout Analysis AI. Your task is to perform O
 6.  **RECONSTRUCT HYPHENATED WORDS**: If a word is split by a hyphen at the end of a line and continues on the next line, remove both the line break and the hyphen, then reconstruct the full word.
 7.  **SINGLE-COLUMN REWRITE OF THE TEXT**: Do not reproduce the exact visual layout, line wrapping, or page-width text flow inside the transcription. Rewrite the content as if it were a clean single-column document while preserving the true paragraph structure.
 ${getReferenceInstruction(removeReferences)}
-9.  **PARAGRAPH DETECTION**: Remove unnecessary line breaks, fragmented words, and layout-only text breaks. Use real paragraph cues from the source, especially indentation at the beginning of a paragraph, to decide when a new paragraph actually starts.
-10. **MULTI-COLUMN READING ORDER**: If the page contains multiple columns, process one full column at a time from left to right. Never read horizontally across the entire page width.
+9.  **INDENTATION DEFINES PARAGRAPHS**: Treat visible first-line indentation as a decisive paragraph cue. If a line begins noticeably to the right of the previous paragraph's left margin, start a new paragraph before that line. Never merge an indented line into the previous paragraph.
+10. **MULTI-COLUMN READING ORDER IS MANDATORY**: Before transcribing, decide whether the page has one column or multiple separated columns. If multiple columns exist, finish the entire leftmost column from top to bottom before moving to the next column on the right. Never read horizontally across the full page width.
+11. **DO NOT CROSS COLUMN GUTTERS**: A wide vertical blank gutter or clearly separated text region means separate columns. Do not merge text from adjacent columns into one paragraph, and never continue a sentence across the gutter.
 
 **Task Steps**:
 0.  **Classify Blank Pages**: If the page is blank or only contains scanning artifacts, stains, or edge noise without readable content, set "blankPage" to true and return an empty "blocks" array.
-1.  **Determine Reading Order**: Identify the correct reading order before transcribing. Respect true paragraph flow, indentation cues, and multi-column layout.
+1.  **Determine Reading Order**: Identify the correct reading order before transcribing. Detect the column structure first. Respect true paragraph flow, indentation cues, and multi-column layout. When columns exist, finish the full left column before moving to the next column on the right.
 2.  **Extract Text**: Read all text in the image while enforcing the paragraph and line-reconstruction rules above.
-3.  **Segment Blocks**: Group continuous text into coherent paragraphs or logical blocks. Do not split a single paragraph into multiple MAIN_TEXT blocks unless necessary.
+3.  **Segment Blocks**: Group continuous text into coherent paragraphs or logical blocks. Start a new paragraph block whenever the source shows a true paragraph break or a new indented paragraph. Do not split a single paragraph into multiple MAIN_TEXT blocks unless necessary.
 4.  **Label Blocks**: Assign one of the following labels to each block:
     *   **TITLE**: Titles, subtitles, section headers (usually larger font, bold, centered, or short lines at the start of sections).
     *   **MAIN_TEXT**: The primary body content of the document.${removeReferences ? ' Remove in-text citations from this content.' : ''}
@@ -86,7 +87,7 @@ ${getReferenceInstruction(removeReferences)}
     *   **HEADER**: Repeated text at the very top (page numbers, chapter titles).
     *   **FOOTER**: Repeated text at the very bottom (page numbers, book titles).
     *   **CAPTION**: Text describing images or tables.
-5.  **Handling Ambiguity**: If no clear title exists, label as MAIN_TEXT. Be strict about separating HEADER and FOOTER from MAIN_TEXT. Keep layout coordinates in "box_2d", but do not let visual line wrapping leak into the block text.
+5.  **Handling Ambiguity**: If no clear title exists, label as MAIN_TEXT. Be strict about separating HEADER and FOOTER from MAIN_TEXT. When layout cues conflict, column order takes priority for reading order and indentation takes priority for paragraph breaks. Keep layout coordinates in "box_2d", but do not let visual line wrapping leak into the block text.
 
 **Output Format**:
 Return a valid JSON object with the following structure:

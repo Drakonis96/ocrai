@@ -155,7 +155,7 @@ describe('Dashboard document actions', () => {
     expect(onMoveItem).toHaveBeenCalledWith('doc-1', 'folder-1');
   });
 
-  it('opens the reprocess modal and submits the selected model for the full document', async () => {
+  it('opens the reprocess modal and submits the selected model and batch size for the full document', async () => {
     const onReprocessDocument = vi.fn(async () => {});
 
     await act(async () => {
@@ -187,15 +187,28 @@ describe('Dashboard document actions', () => {
     expect(container.querySelector('[data-testid="reprocess-document-dialog"]')).not.toBeNull();
     expect(container.textContent).toContain('Reprocess all 2 pages');
 
-    const modelSelect = container.querySelector('[data-testid="reprocess-document-dialog"] select') as HTMLSelectElement | null;
-    expect(modelSelect).not.toBeNull();
+    const selects = Array.from(
+      container.querySelectorAll('[data-testid="reprocess-document-dialog"] select')
+    ) as HTMLSelectElement[];
+    const [modelSelect, batchSizeSelect] = selects;
+    expect(modelSelect).toBeDefined();
+    expect(batchSizeSelect).toBeDefined();
     expect(modelSelect?.value).toBe('gemini-flash-lite-latest');
+    expect(batchSizeSelect?.value).toBe('1');
 
     await act(async () => {
       if (modelSelect) {
         const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
         valueSetter?.call(modelSelect, 'gemini-flash-lite-latest');
         modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    await act(async () => {
+      if (batchSizeSelect) {
+        const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+        valueSetter?.call(batchSizeSelect, '5');
+        batchSizeSelect.dispatchEvent(new Event('change', { bubbles: true }));
       }
     });
 
@@ -206,6 +219,6 @@ describe('Dashboard document actions', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onReprocessDocument).toHaveBeenCalledWith('doc-1', 'gemini-flash-lite-latest');
+    expect(onReprocessDocument).toHaveBeenCalledWith('doc-1', 'gemini-flash-lite-latest', 5);
   });
 });
