@@ -400,6 +400,7 @@ export const createDocumentProcessingManager = ({
               targetLanguage: docData.targetLanguage,
               customPrompt: docData.customPrompt,
               removeReferences: docData.removeReferences !== false,
+              splitColumns: docData.splitColumns === true,
               docId,
               pageIndex,
               pageNumber,

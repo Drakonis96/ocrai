@@ -94,6 +94,7 @@ const UploadView: React.FC<UploadViewProps> = ({
       targetLanguage: options.processingMode === 'translation' ? options.targetLanguage : undefined,
       customPrompt: options.processingMode === 'manual' ? options.customPrompt : undefined,
       removeReferences: options.processingMode !== 'manual' ? options.removeReferences : undefined,
+      splitColumns: options.splitColumns === true ? true : undefined,
     });
   };
 

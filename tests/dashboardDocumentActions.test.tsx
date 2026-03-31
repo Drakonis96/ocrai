@@ -219,6 +219,6 @@ describe('Dashboard document actions', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(onReprocessDocument).toHaveBeenCalledWith('doc-1', 'gemini-flash-lite-latest', 5);
+    expect(onReprocessDocument).toHaveBeenCalledWith('doc-1', 'gemini-flash-lite-latest', 5, false);
   });
 });

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.2 - 2026-03-31
+
+### Added
+- Added an optional `Split columns before OCR` processing mode for new uploads and full-document reprocessing, so each detected column is cropped and sent to Gemini independently from left to right.
+
+### Changed
+- Added server-side automatic column detection and image cropping before OCR, using Gemini for layout detection plus `sharp` to extract each column region.
+
+### Fixed
+- Reduced OCR ordering mistakes on multi-column pages by preventing Gemini from jumping across gutters and by feeding each full column as an isolated input.
+
+### Testing
+- Verified the automated suite (`46` tests), TypeScript compilation, and server syntax after the multi-column processing changes.
+
 ## v1.3.1 - 2026-03-31
 
 ### Added

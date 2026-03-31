@@ -12,10 +12,12 @@ interface ReprocessDocumentDialogProps {
   models: GeminiModel[];
   selectedModelId: string;
   selectedPagesPerBatch: number;
+  selectedSplitColumns: boolean;
   error: string;
   isSubmitting: boolean;
   onChangeModel: (modelId: string) => void;
   onChangePagesPerBatch: (pagesPerBatch: number) => void;
+  onChangeSplitColumns: (splitColumns: boolean) => void;
   onClose: () => void;
   onSubmit: () => void;
 }
@@ -27,10 +29,12 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
   models,
   selectedModelId,
   selectedPagesPerBatch,
+  selectedSplitColumns,
   error,
   isSubmitting,
   onChangeModel,
   onChangePagesPerBatch,
+  onChangeSplitColumns,
   onClose,
   onSubmit,
 }) => {
@@ -125,6 +129,18 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             Full-document reprocessing will process this many pages in parallel.
           </p>
+        </label>
+
+        <label className="group mt-4 flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selectedSplitColumns}
+            onChange={(event) => onChangeSplitColumns(event.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700"
+          />
+          <span className="ml-2 text-sm text-slate-600 transition-colors group-hover:text-blue-600 dark:text-slate-400 dark:group-hover:text-blue-400">
+            Split columns before OCR <span className="text-xs text-slate-400">(detects and processes each column separately)</span>
+          </span>
         </label>
 
         {error && (

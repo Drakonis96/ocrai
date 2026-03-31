@@ -552,6 +552,7 @@ const App: React.FC = () => {
           customPrompt: options.customPrompt,
           removeReferences: options.removeReferences,
           pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
+          splitColumns: options.splitColumns === true,
           totalPages: images.length,
           processedPages: 0,
           failedPages: 0,
@@ -625,7 +626,7 @@ const App: React.FC = () => {
     return refreshedDoc ?? null;
   }, []);
 
-  const handleReprocessDocument = useCallback(async (docId: string, modelName: string, pagesPerBatch: number) => {
+  const handleReprocessDocument = useCallback(async (docId: string, modelName: string, pagesPerBatch: number, splitColumns: boolean) => {
     const currentDoc = itemsRef.current.find((item) => item.type === 'file' && item.id === docId) as DocumentData | undefined;
     if (!currentDoc) {
       throw new Error('Document not found.');
@@ -639,7 +640,7 @@ const App: React.FC = () => {
       ? pagesPerBatch
       : (Number.isInteger(currentDoc.pagesPerBatch) && (currentDoc.pagesPerBatch ?? 0) > 0 ? currentDoc.pagesPerBatch ?? 1 : 1);
 
-    const updatedDoc = await reprocessDocument(docId, modelName, normalizedPagesPerBatch);
+    const updatedDoc = await reprocessDocument(docId, modelName, normalizedPagesPerBatch, splitColumns);
     setItems((current) => current.map((entry) => (entry.id === updatedDoc.id ? updatedDoc : entry)));
   }, []);
 

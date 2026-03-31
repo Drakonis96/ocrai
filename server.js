@@ -8,6 +8,7 @@ import crypto, { randomUUID } from 'crypto';
 import { GoogleGenAI, Type } from "@google/genai";
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import sharp from 'sharp';
 import { handleLoginAttempt, verifySession, logoutSession } from './services/authService.js';
 import {
   createDocumentProcessingManager,
@@ -584,6 +585,150 @@ function blocksToMarkdown(blocks) {
   }).join('');
 }
 
+async function detectColumns(base64Image, mimeType, modelName) {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("Server API Key configuration missing.");
+  }
+
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+  const detectColumnsPrompt = `You are a document layout analysis AI. Analyze this document image and detect the text column structure.
+
+**TASK**: Determine how many separate text columns the page has and return the horizontal boundaries (x coordinates) of each column.
+
+**RULES**:
+- Only detect clearly separated text columns with a visible vertical gutter between them.
+- Do NOT count margins. Only count distinct content columns.
+- If the page has a single column of text (normal layout), return exactly one column spanning the full text area.
+- Coordinates are normalized 0-1000 where 0 is the left edge and 1000 is the right edge of the image.
+- Order columns from left to right.
+- Each column should include some padding to avoid cutting text.
+
+**OUTPUT**: Return a JSON object with this structure:
+{
+  "columnCount": 2,
+  "columns": [
+    { "xmin": 30, "xmax": 480 },
+    { "xmin": 510, "xmax": 970 }
+  ]
+}`;
+
+  const responseSchema = {
+    type: Type.OBJECT,
+    properties: {
+      columnCount: { type: Type.NUMBER },
+      columns: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            xmin: { type: Type.NUMBER },
+            xmax: { type: Type.NUMBER },
+          },
+          required: ["xmin", "xmax"]
+        }
+      }
+    },
+    required: ["columnCount", "columns"]
+  };
+
+  const response = await ai.models.generateContent({
+    model: modelName || DEFAULT_MODEL_ID,
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: detectColumnsPrompt },
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Image
+            }
+          }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: responseSchema,
+      temperature: 0.1,
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }
+      ]
+    }
+  });
+
+  const textResponse = typeof response.text === 'function' ? response.text() : response.text;
+  if (!textResponse) {
+    return { columnCount: 1, columns: [{ xmin: 0, xmax: 1000 }] };
+  }
+
+  try {
+    const parsed = JSON.parse(textResponse);
+    if (!parsed || !Array.isArray(parsed.columns) || parsed.columns.length <= 1) {
+      return { columnCount: 1, columns: [{ xmin: 0, xmax: 1000 }] };
+    }
+
+    // Sort columns left to right
+    parsed.columns.sort((a, b) => a.xmin - b.xmin);
+    return parsed;
+  } catch {
+    return { columnCount: 1, columns: [{ xmin: 0, xmax: 1000 }] };
+  }
+}
+
+async function cropColumnFromImage(base64Image, mimeType, column) {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const metadata = await sharp(imageBuffer).metadata();
+  const width = metadata.width || 1;
+  const height = metadata.height || 1;
+
+  const left = Math.max(0, Math.round((column.xmin / 1000) * width));
+  const right = Math.min(width, Math.round((column.xmax / 1000) * width));
+  const cropWidth = Math.max(1, right - left);
+
+  const croppedBuffer = await sharp(imageBuffer)
+    .extract({ left, top: 0, width: cropWidth, height })
+    .toBuffer();
+
+  return croppedBuffer.toString('base64');
+}
+
+async function processPageWithColumnSplitting(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences) {
+  // Step 1: Detect columns
+  const columnInfo = await detectColumns(base64Image, mimeType, modelName);
+
+  if (columnInfo.columnCount <= 1) {
+    // Single column - process normally
+    return processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences);
+  }
+
+  // Step 2: Crop and process each column separately
+  const allBlocks = [];
+  let isBlankPage = true;
+
+  for (const column of columnInfo.columns) {
+    const croppedBase64 = await cropColumnFromImage(base64Image, mimeType, column);
+    const result = await processPageWithGemini(croppedBase64, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences);
+
+    if (!result.blankPage) {
+      isBlankPage = false;
+    }
+
+    if (Array.isArray(result.blocks)) {
+      allBlocks.push(...result.blocks);
+    }
+  }
+
+  return {
+    blankPage: isBlankPage,
+    blocks: isBlankPage ? [] : allBlocks,
+  };
+}
+
 async function processPageWithGemini(base64Image, mimeType, modelName, processingMode = 'ocr', targetLanguage = '', customPrompt = '', removeReferences = true) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("Server API Key configuration missing.");
@@ -691,15 +836,10 @@ const { processDocumentBackground, resumePendingDocuments } = createDocumentProc
     targetLanguage,
     customPrompt,
     removeReferences,
-  }) => processPageWithGemini(
-    base64Image,
-    mimeType,
-    modelName,
-    processingMode,
-    targetLanguage,
-    customPrompt,
-    removeReferences
-  ),
+    splitColumns,
+  }) => splitColumns
+    ? processPageWithColumnSplitting(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences)
+    : processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences),
 });
 
 app.post('/api/reprocess-page', async (req, res) => {
@@ -793,7 +933,7 @@ app.post('/api/reprocess-page', async (req, res) => {
 });
 
 app.post('/api/reprocess-document', async (req, res) => {
-  const { docId, modelName, pagesPerBatch } = req.body;
+  const { docId, modelName, pagesPerBatch, splitColumns } = req.body;
 
   try {
     const safeDocId = assertDocumentId(docId);
@@ -827,6 +967,7 @@ app.post('/api/reprocess-document', async (req, res) => {
 
     docData.modelUsed = nextModelName || DEFAULT_MODEL_ID;
     docData.pagesPerBatch = getPagesPerBatch(pagesPerBatch, docData.pagesPerBatch);
+    docData.splitColumns = splitColumns === true;
     if (docData.labels.length === 0) {
       const labelingSettings = await readLabelingSettings();
       if (labelingSettings.autoLabelDocuments && availableLabels.length > 0) {

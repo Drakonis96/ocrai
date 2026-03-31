@@ -158,7 +158,8 @@ const reprocessPage = async (
 const reprocessDocument = async (
   docId: string,
   modelName: string = DEFAULT_MODEL_ID,
-  pagesPerBatch: number = 1
+  pagesPerBatch: number = 1,
+  splitColumns: boolean = false
 ): Promise<DocumentData> => {
   try {
     const response = await fetch('/api/reprocess-document', {
@@ -170,6 +171,7 @@ const reprocessDocument = async (
         docId,
         modelName,
         pagesPerBatch,
+        splitColumns,
       }),
     });
 

@@ -162,6 +162,18 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
           </label>
         )}
 
+        <label className="group mt-3 flex items-center cursor-pointer">
+          <input
+            type="checkbox"
+            checked={options.splitColumns === true}
+            onChange={(event) => updateOption('splitColumns', event.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700"
+          />
+          <span className="ml-2 text-sm text-slate-600 transition-colors group-hover:text-blue-600 dark:text-slate-400 dark:group-hover:text-blue-400">
+            Split columns before OCR <span className="text-xs text-slate-400">(detects and processes each column separately)</span>
+          </span>
+        </label>
+
         {options.processingMode === 'translation' && (
           <div className="mt-4">
             <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Target Language</label>

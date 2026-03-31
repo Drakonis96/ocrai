@@ -58,6 +58,7 @@ export interface DocumentData extends FileSystemItem {
   customPrompt?: string;
   removeReferences?: boolean;
   pagesPerBatch?: number;
+  splitColumns?: boolean;
   // Progress tracking
   totalPages: number;
   processedPages: number;
@@ -85,6 +86,7 @@ export interface ProcessingOptions {
   customPrompt?: string;
   removeReferences?: boolean;
   pagesPerBatch?: number;
+  splitColumns?: boolean;
 }
 
 export interface PromptPreset {

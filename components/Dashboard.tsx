@@ -40,7 +40,7 @@ interface DashboardProps {
   onRenameDocument: (docId: string, nextName: string) => Promise<void>;
   onToggleDocumentRead: (docId: string, isRead: boolean) => Promise<void>;
   onUpdateDocumentLabels?: (docId: string, nextLabels: string[]) => Promise<void>;
-  onReprocessDocument: (docId: string, modelId: string, pagesPerBatch: number) => Promise<void>;
+  onReprocessDocument: (docId: string, modelId: string, pagesPerBatch: number, splitColumns: boolean) => Promise<void>;
   onOpenSettings?: (tab?: SettingsTab) => void;
 }
 
@@ -131,6 +131,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [reprocessDocumentId, setReprocessDocumentId] = useState<string | null>(null);
   const [reprocessModelId, setReprocessModelId] = useState(getPreferredDefaultModelId(models));
   const [reprocessPagesPerBatch, setReprocessPagesPerBatch] = useState(1);
+  const [reprocessSplitColumns, setReprocessSplitColumns] = useState(false);
   const [reprocessError, setReprocessError] = useState('');
   const [isReprocessingDocument, setIsReprocessingDocument] = useState(false);
   const [labelDocumentId, setLabelDocumentId] = useState<string | null>(null);
@@ -462,6 +463,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     setReprocessDocumentId(doc.id);
     setReprocessModelId(getPreferredDefaultModelId(models) || doc.modelUsed || DEFAULT_MODEL_ID);
     setReprocessPagesPerBatch(Number.isInteger(doc.pagesPerBatch) && (doc.pagesPerBatch ?? 0) > 0 ? doc.pagesPerBatch ?? 1 : 1);
+    setReprocessSplitColumns(doc.splitColumns === true);
     setReprocessError('');
   }, [models]);
 
@@ -482,7 +484,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     setIsReprocessingDocument(true);
 
     try {
-      await onReprocessDocument(reprocessDocumentItem.id, reprocessModelId, reprocessPagesPerBatch);
+      await onReprocessDocument(reprocessDocumentItem.id, reprocessModelId, reprocessPagesPerBatch, reprocessSplitColumns);
       setReprocessDocumentId(null);
       setReprocessError('');
     } catch (error: any) {
@@ -490,7 +492,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     } finally {
       setIsReprocessingDocument(false);
     }
-  }, [onReprocessDocument, reprocessDocumentItem, reprocessModelId, reprocessPagesPerBatch]);
+  }, [onReprocessDocument, reprocessDocumentItem, reprocessModelId, reprocessPagesPerBatch, reprocessSplitColumns]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -964,10 +966,12 @@ const Dashboard: React.FC<DashboardProps> = ({
       models={models}
       selectedModelId={reprocessModelId}
       selectedPagesPerBatch={reprocessPagesPerBatch}
+      selectedSplitColumns={reprocessSplitColumns}
       error={reprocessError}
       isSubmitting={isReprocessingDocument}
       onChangeModel={setReprocessModelId}
       onChangePagesPerBatch={setReprocessPagesPerBatch}
+      onChangeSplitColumns={setReprocessSplitColumns}
       onClose={handleCloseReprocessDialog}
       onSubmit={handleSubmitReprocessDocument}
     />
