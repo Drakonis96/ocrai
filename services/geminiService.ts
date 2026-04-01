@@ -1,10 +1,11 @@
 import { DocumentData, TextBlock, ProcessingOptions } from "../types";
-import { DEFAULT_MODEL_ID } from "../utils/modelStorage";
+import { DEFAULT_MODEL_ID, OcrProvider } from "../utils/modelStorage";
 
 const processPageWithGemini = async (
   base64Image: string,
   mimeType: string,
   modelName: string = DEFAULT_MODEL_ID,
+  modelProvider: OcrProvider = 'gemini',
   processingMode: ProcessingOptions['processingMode'] = 'ocr',
   targetLanguage?: string,
   customPrompt?: string
@@ -20,6 +21,7 @@ const processPageWithGemini = async (
         base64Image,
         mimeType,
         modelName,
+        modelProvider,
         processingMode,
         targetLanguage,
         customPrompt
@@ -110,6 +112,7 @@ const reprocessPage = async (
   docId: string,
   pageIndex: number,
   modelName: string = DEFAULT_MODEL_ID,
+  modelProvider: OcrProvider = 'gemini',
   processingMode: ProcessingOptions['processingMode'] = 'ocr',
   targetLanguage?: string,
   customPrompt?: string,
@@ -125,6 +128,7 @@ const reprocessPage = async (
         docId,
         pageIndex,
         modelName,
+        modelProvider,
         processingMode,
         targetLanguage,
         customPrompt,
@@ -159,7 +163,8 @@ const reprocessDocument = async (
   docId: string,
   modelName: string = DEFAULT_MODEL_ID,
   pagesPerBatch: number = 1,
-  splitColumns: boolean = false
+  splitColumns: boolean = false,
+  modelProvider: OcrProvider = 'gemini'
 ): Promise<DocumentData> => {
   try {
     const response = await fetch('/api/reprocess-document', {
@@ -170,6 +175,7 @@ const reprocessDocument = async (
       body: JSON.stringify({
         docId,
         modelName,
+        modelProvider,
         pagesPerBatch,
         splitColumns,
       }),

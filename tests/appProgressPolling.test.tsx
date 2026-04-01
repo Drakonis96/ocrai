@@ -22,6 +22,9 @@ const createLabel = vi.fn();
 const deleteLabel = vi.fn();
 const getLabelingSettings = vi.fn();
 const updateLabelingSettings = vi.fn();
+const getOcrSettings = vi.fn();
+const updateOcrSettings = vi.fn();
+const autodetectProviderModels = vi.fn();
 
 vi.mock('../utils/storage', () => ({
   getAllItems,
@@ -31,12 +34,27 @@ vi.mock('../utils/storage', () => ({
 }));
 
 vi.mock('../utils/modelStorage', () => ({
+  DEFAULT_OCR_SETTINGS: {
+    provider: 'gemini',
+    selectedModelId: 'gemini-flash-latest',
+    lmStudio: { host: '127.0.0.1', port: 1234 },
+    ollama: { host: '127.0.0.1', port: 11434 },
+  },
   DEFAULT_MODELS: [
-    { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' },
+    { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced', provider: 'gemini' },
   ],
   getModels,
   addModel,
   removeModel,
+  getProviderModels: (models: Array<{ provider?: string }>, provider: string) =>
+    models.filter((model) => (model.provider ?? 'gemini') === provider),
+  sortModelsForPreferredSelection: (models: unknown[]) => models,
+}));
+
+vi.mock('../services/ocrSettingsService', () => ({
+  getOcrSettings,
+  updateOcrSettings,
+  autodetectProviderModels,
 }));
 
 vi.mock('../services/promptService', () => ({
@@ -163,7 +181,14 @@ describe('App processing polling', () => {
     getAllItems.mockReset();
     getAllItems.mockResolvedValue([processingDocument]);
     getModels.mockReset();
-    getModels.mockResolvedValue([{ id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' }]);
+    getModels.mockResolvedValue([{ id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced', provider: 'gemini' }]);
+    getOcrSettings.mockReset();
+    getOcrSettings.mockResolvedValue({
+      provider: 'gemini',
+      selectedModelId: 'gemini-flash-latest',
+      lmStudio: { host: '127.0.0.1', port: 1234 },
+      ollama: { host: '127.0.0.1', port: 11434 },
+    });
     getPrompts.mockReset();
     getPrompts.mockResolvedValue([]);
     getLabels.mockReset();

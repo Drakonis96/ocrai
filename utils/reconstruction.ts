@@ -55,15 +55,9 @@ export const reconstructCleanText = (
   let cleanText = "";
 
   pages.forEach((page) => {
-    // If blocks have readingOrder metadata (from column detection mode), respect that order.
-    // Otherwise fall back to geometric sorting by vertical then horizontal position.
-    const hasReadingOrder = page.blocks.some((b) => typeof b.readingOrder === 'number');
+    // Sort blocks by vertical position (ymin) then horizontal (xmin) to ensure reading order
+    // box_2d is [ymin, xmin, ymax, xmax]
     const sortedBlocks = [...page.blocks].sort((a, b) => {
-      if (hasReadingOrder) {
-        return (a.readingOrder ?? Number.MAX_SAFE_INTEGER) - (b.readingOrder ?? Number.MAX_SAFE_INTEGER);
-      }
-
-      // box_2d is [ymin, xmin, ymax, xmax]
       const boxA = a.box_2d || [0, 0, 0, 0];
       const boxB = b.box_2d || [0, 0, 0, 0];
       

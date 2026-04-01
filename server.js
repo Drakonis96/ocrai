@@ -18,6 +18,17 @@ import {
   normalizeDocumentRuntimeState,
 } from './services/documentProcessing.js';
 import { buildOcrPrompt } from './services/ocrPromptBuilder.js';
+import {
+  DEFAULT_PROVIDER_CONNECTIONS,
+  LOCAL_OCR_PROVIDERS,
+  autodetectLmStudioModels,
+  autodetectOllamaModels,
+  normalizeOcrProvider,
+  normalizeProviderConnection,
+  requestStructuredOutputFromLmStudio,
+  requestStructuredOutputFromOllama,
+  sanitizeOcrModel,
+} from './services/ocrProviderService.js';
 
 // Load environment variables
 dotenv.config({ path: '.env.local' });
@@ -185,42 +196,55 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const MODELS_FILE = path.join(DATA_DIR, 'models.json');
+const OCR_SETTINGS_FILE = path.join(DATA_DIR, 'ocr-settings.json');
 const PROMPTS_FILE = path.join(DATA_DIR, 'prompts.json');
 const LABELS_FILE = path.join(DATA_DIR, 'labels.json');
 const LABELING_SETTINGS_FILE = path.join(DATA_DIR, 'labeling-settings.json');
 const DEFAULT_MODEL_ID = 'gemini-flash-lite-latest';
+const DEFAULT_OCR_PROVIDER = 'gemini';
 const DEFAULT_LABELING_SETTINGS = {
   autoLabelDocuments: false,
 };
 
 const DEFAULT_MODELS = [
-  { id: DEFAULT_MODEL_ID, name: 'Gemini Flash Lite Latest', description: 'Cheapest' },
-  { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced' },
+  { id: DEFAULT_MODEL_ID, name: 'Gemini Flash Lite Latest', description: 'Cheapest', provider: 'gemini' },
+  { id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced', provider: 'gemini' },
+];
+const BlockLabelValues = [
+  'TITLE', 'MAIN_TEXT', 'FOOTNOTE', 'HEADER', 'FOOTER', 'CAPTION', 'UNKNOWN'
 ];
 
 const REMOVED_MODEL_IDS = new Set(['gemini-2.5-flash', 'gemini-2.5-flash-lite']);
+const DEFAULT_OCR_SETTINGS = {
+  provider: DEFAULT_OCR_PROVIDER,
+  selectedModelId: DEFAULT_MODEL_ID,
+  lmStudio: { ...DEFAULT_PROVIDER_CONNECTIONS.lmstudio },
+  ollama: { ...DEFAULT_PROVIDER_CONNECTIONS.ollama },
+};
 
 const sanitizeModel = (model) => {
-  const id = typeof model?.id === 'string' ? model.id.trim() : '';
-  if (!id || REMOVED_MODEL_IDS.has(id)) {
+  const sanitized = sanitizeOcrModel(model);
+  if (!sanitized || REMOVED_MODEL_IDS.has(sanitized.id)) {
     return null;
   }
 
-  const name = typeof model?.name === 'string' && model.name.trim() ? model.name.trim() : id;
-  const description = typeof model?.description === 'string' && model.description.trim()
-    ? model.description.trim()
-    : 'Custom';
-
-  return { id, name, description };
+  return sanitized;
 };
 
 const sortModels = (models) => {
-  const defaultIds = new Set(DEFAULT_MODELS.map((model) => model.id));
+  const defaultKeys = new Set(DEFAULT_MODELS.map((model) => `${model.provider}:${model.id}`));
   const defaults = DEFAULT_MODELS.map((model) => ({ ...model }));
   const customs = models
-    .filter((model) => !defaultIds.has(model.id))
-    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }))
-    .map((model) => ({ ...model, isCustom: true }));
+    .filter((model) => !defaultKeys.has(`${model.provider}:${model.id}`))
+    .sort((left, right) => (
+      left.provider.localeCompare(right.provider, undefined, { sensitivity: 'base' })
+      || left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+    ))
+    .map((model) => ({
+      ...model,
+      isCustom: model.isCustom === true,
+      isAutodetected: model.isAutodetected === true,
+    }));
 
   return [...defaults, ...customs];
 };
@@ -245,8 +269,13 @@ const writeCustomModels = async (models) => {
   const sanitized = models
     .map(sanitizeModel)
     .filter(Boolean)
-    .filter((model, index, collection) => collection.findIndex((entry) => entry.id === model.id) === index)
-    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
+    .filter((model, index, collection) => collection.findIndex((entry) => (
+      entry.provider === model.provider && entry.id === model.id
+    )) === index)
+    .sort((left, right) => (
+      left.provider.localeCompare(right.provider, undefined, { sensitivity: 'base' })
+      || left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
+    ));
 
   await fs.promises.writeFile(MODELS_FILE, JSON.stringify(sanitized, null, 2));
   return sanitized;
@@ -255,6 +284,64 @@ const writeCustomModels = async (models) => {
 const getAllModels = async () => {
   const customModels = await readCustomModels();
   return sortModels(customModels);
+};
+
+const normalizeOcrSettings = (settings, models = DEFAULT_MODELS) => {
+  const provider = normalizeOcrProvider(settings?.provider);
+  const selectedModelId = typeof settings?.selectedModelId === 'string' ? settings.selectedModelId.trim() : '';
+  const providerModels = models.filter((model) => model.provider === provider);
+  const preferredModelId = providerModels.some((model) => model.id === selectedModelId)
+    ? selectedModelId
+    : (providerModels[0]?.id ?? (provider === DEFAULT_OCR_PROVIDER ? DEFAULT_MODEL_ID : ''));
+
+  return {
+    provider,
+    selectedModelId: preferredModelId,
+    lmStudio: normalizeProviderConnection('lmstudio', settings?.lmStudio),
+    ollama: normalizeProviderConnection('ollama', settings?.ollama),
+  };
+};
+
+const mergeOcrSettings = (baseSettings, nextSettings) => {
+  if (!nextSettings || typeof nextSettings !== 'object') {
+    return baseSettings;
+  }
+
+  return {
+    ...baseSettings,
+    ...nextSettings,
+    lmStudio: {
+      ...baseSettings.lmStudio,
+      ...(nextSettings.lmStudio && typeof nextSettings.lmStudio === 'object' ? nextSettings.lmStudio : {}),
+    },
+    ollama: {
+      ...baseSettings.ollama,
+      ...(nextSettings.ollama && typeof nextSettings.ollama === 'object' ? nextSettings.ollama : {}),
+    },
+  };
+};
+
+const readOcrSettings = async (models = DEFAULT_MODELS) => {
+  if (!fs.existsSync(OCR_SETTINGS_FILE)) {
+    return normalizeOcrSettings(DEFAULT_OCR_SETTINGS, models);
+  }
+
+  const data = await fs.promises.readFile(OCR_SETTINGS_FILE, 'utf-8');
+  const parsed = JSON.parse(data);
+  const normalized = normalizeOcrSettings(parsed, models);
+  const normalizedJson = JSON.stringify(normalized, null, 2);
+
+  if (normalizedJson !== JSON.stringify(parsed, null, 2)) {
+    await fs.promises.writeFile(OCR_SETTINGS_FILE, normalizedJson);
+  }
+
+  return normalized;
+};
+
+const writeOcrSettings = async (settings, models = DEFAULT_MODELS) => {
+  const normalized = normalizeOcrSettings(settings, models);
+  await fs.promises.writeFile(OCR_SETTINGS_FILE, JSON.stringify(normalized, null, 2));
+  return normalized;
 };
 
 const normalizePrompt = (prompt) => {
@@ -399,24 +486,86 @@ const writeLabelingSettings = async (settings) => {
   return normalized;
 };
 
-const selectLabelsForDocumentName = async (documentName, availableLabels, modelName = DEFAULT_MODEL_ID) => {
-  const normalizedDocumentName = typeof documentName === 'string' ? documentName.trim() : '';
-  const canonicalLabels = normalizeDocumentLabels(availableLabels);
-  if (!normalizedDocumentName || canonicalLabels.length === 0 || !process.env.GEMINI_API_KEY) {
-    return [];
+const buildLocalResponseSchema = (properties, required) => ({
+  type: 'object',
+  properties,
+  required,
+  additionalProperties: false,
+});
+
+const OCR_RESPONSE_JSON_SCHEMA = buildLocalResponseSchema({
+  blankPage: { type: 'boolean' },
+  blocks: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+        label: {
+          type: 'string',
+          enum: BlockLabelValues,
+        },
+        box_2d: {
+          type: 'array',
+          items: { type: 'number' },
+        },
+      },
+      required: ['text', 'label'],
+      additionalProperties: false,
+    },
+  },
+}, ['blankPage', 'blocks']);
+
+const LABEL_SELECTION_JSON_SCHEMA = buildLocalResponseSchema({
+  labels: {
+    type: 'array',
+    items: { type: 'string' },
+  },
+}, ['labels']);
+
+const getStructuredOutputFromLocalProvider = async ({
+  provider,
+  modelName,
+  prompt,
+  responseSchema,
+  image,
+}) => {
+  const models = await getAllModels();
+  const ocrSettings = await readOcrSettings(models);
+  const connection = provider === 'lmstudio' ? ocrSettings.lmStudio : ocrSettings.ollama;
+
+  if (provider === 'lmstudio') {
+    return requestStructuredOutputFromLmStudio({
+      connection,
+      modelName,
+      prompt,
+      responseSchema,
+      image,
+    });
   }
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const responseSchema = {
-    type: Type.OBJECT,
-    properties: {
-      labels: {
-        type: Type.ARRAY,
-        items: { type: Type.STRING },
-      },
-    },
-    required: ['labels'],
-  };
+  return requestStructuredOutputFromOllama({
+    connection,
+    modelName,
+    prompt,
+    responseSchema,
+    image,
+  });
+};
+
+const selectLabelsForDocumentName = async (
+  documentName,
+  availableLabels,
+  modelName = DEFAULT_MODEL_ID,
+  modelProvider = DEFAULT_OCR_PROVIDER
+) => {
+  const normalizedDocumentName = typeof documentName === 'string' ? documentName.trim() : '';
+  const canonicalLabels = normalizeDocumentLabels(availableLabels);
+  const provider = normalizeOcrProvider(modelProvider);
+
+  if (!normalizedDocumentName || canonicalLabels.length === 0) {
+    return [];
+  }
 
   const prompt = [
     'You assign document labels using only the document name.',
@@ -428,22 +577,47 @@ const selectLabelsForDocumentName = async (documentName, availableLabels, modelN
     'Prefer fewer labels when uncertain.',
   ].join('\n');
 
-  const response = await ai.models.generateContent({
-    model: modelName || DEFAULT_MODEL_ID,
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema,
-      temperature: 0.1,
-    },
-  });
+  let parsed;
+  if (provider === 'gemini') {
+    if (!process.env.GEMINI_API_KEY) {
+      return [];
+    }
 
-  const responseText = typeof response.text === 'function' ? response.text() : response.text;
-  if (!responseText) {
-    return [];
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const response = await ai.models.generateContent({
+      model: modelName || DEFAULT_MODEL_ID,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            labels: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+          },
+          required: ['labels'],
+        },
+        temperature: 0.1,
+      },
+    });
+
+    const responseText = typeof response.text === 'function' ? response.text() : response.text;
+    if (!responseText) {
+      return [];
+    }
+
+    parsed = JSON.parse(responseText);
+  } else {
+    parsed = await getStructuredOutputFromLocalProvider({
+      provider,
+      modelName,
+      prompt,
+      responseSchema: LABEL_SELECTION_JSON_SCHEMA,
+    });
   }
 
-  const parsed = JSON.parse(responseText);
   const selectedLabels = Array.isArray(parsed?.labels) ? parsed.labels : [];
   const labelsByKey = new Map(canonicalLabels.map((label) => [label.toLowerCase(), label]));
 
@@ -493,12 +667,12 @@ app.post('/api/models', async (req, res) => {
     }
 
     const existingModels = await getAllModels();
-    if (existingModels.some((entry) => entry.id === model.id)) {
-      return res.status(400).json({ error: `Model with ID "${model.id}" already exists` });
+    if (existingModels.some((entry) => entry.id === model.id && entry.provider === model.provider)) {
+      return res.status(400).json({ error: `Model with ID "${model.id}" already exists for ${model.provider}` });
     }
 
     const customModels = await readCustomModels();
-    await writeCustomModels([...customModels, model]);
+    await writeCustomModels([...customModels, { ...model, isCustom: true, isAutodetected: false }]);
     res.json(await getAllModels());
   } catch (error) {
     handleRouteError(res, 'Failed to save model', error);
@@ -508,12 +682,13 @@ app.post('/api/models', async (req, res) => {
 app.delete('/api/models/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    if (DEFAULT_MODELS.some((model) => model.id === id)) {
+    const provider = normalizeOcrProvider(req.query?.provider);
+    if (DEFAULT_MODELS.some((model) => model.id === id && model.provider === provider)) {
       return res.status(400).json({ error: 'Cannot remove default models' });
     }
 
     const customModels = await readCustomModels();
-    const nextModels = customModels.filter((model) => model.id !== id);
+    const nextModels = customModels.filter((model) => !(model.id === id && model.provider === provider));
     if (nextModels.length === customModels.length) {
       return res.status(404).json({ error: 'Model not found' });
     }
@@ -522,6 +697,66 @@ app.delete('/api/models/:id', async (req, res) => {
     res.json(await getAllModels());
   } catch (error) {
     handleRouteError(res, 'Failed to delete model', error);
+  }
+});
+
+app.get('/api/ocr-settings', async (req, res) => {
+  try {
+    const models = await getAllModels();
+    res.json(await readOcrSettings(models));
+  } catch (error) {
+    handleRouteError(res, 'Failed to load OCR settings', error);
+  }
+});
+
+app.put('/api/ocr-settings', async (req, res) => {
+  try {
+    const models = await getAllModels();
+    res.json(await writeOcrSettings(req.body, models));
+  } catch (error) {
+    handleRouteError(res, 'Failed to save OCR settings', error);
+  }
+});
+
+app.post('/api/ocr-providers/:provider/models/autodetect', async (req, res) => {
+  try {
+    const provider = normalizeOcrProvider(req.params.provider);
+    if (!LOCAL_OCR_PROVIDERS.has(provider)) {
+      throw createPublicError(400, 'Autodetection is only available for LM Studio and Ollama');
+    }
+
+    const existingModels = await readCustomModels();
+    const currentAllModels = sortModels(existingModels);
+    const savedOcrSettings = await readOcrSettings(currentAllModels);
+    const requestedOcrSettings = normalizeOcrSettings(
+      mergeOcrSettings(savedOcrSettings, req.body),
+      currentAllModels
+    );
+    const connection = provider === 'lmstudio' ? requestedOcrSettings.lmStudio : requestedOcrSettings.ollama;
+    const detectedModels = provider === 'lmstudio'
+      ? await autodetectLmStudioModels(connection)
+      : await autodetectOllamaModels(connection);
+
+    const remainingModels = existingModels.filter((model) => model.provider !== provider || model.isAutodetected !== true);
+    const persistedModels = await writeCustomModels([
+      ...remainingModels,
+      ...detectedModels,
+    ]);
+    const allModels = sortModels(persistedModels);
+    const nextSettings = await writeOcrSettings({
+      ...requestedOcrSettings,
+      provider,
+      selectedModelId: requestedOcrSettings.provider === provider
+        ? requestedOcrSettings.selectedModelId
+        : (requestedOcrSettings.selectedModelId || detectedModels[0]?.id || ''),
+    }, allModels);
+
+    res.json({
+      models: allModels,
+      settings: nextSettings,
+    });
+  } catch (error) {
+    handleRouteError(res, 'Failed to autodetect provider models', error);
   }
 });
 
@@ -566,10 +801,6 @@ app.use('/api', async (req, res, next) => {
   next();
 });
 
-const BlockLabelValues = [
-  'TITLE', 'MAIN_TEXT', 'FOOTNOTE', 'HEADER', 'FOOTER', 'CAPTION', 'UNKNOWN'
-];
-
 function blocksToMarkdown(blocks) {
   if (!Array.isArray(blocks)) return '';
   return blocks.map(block => {
@@ -585,61 +816,116 @@ function blocksToMarkdown(blocks) {
   }).join('');
 }
 
-async function processPageWithGemini(base64Image, mimeType, modelName, processingMode = 'ocr', targetLanguage = '', customPrompt = '', removeReferences = true, splitColumns = false) {
+async function detectColumnsFromImage(base64Image) {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const { data, info } = await sharp(imageBuffer)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const { width, height } = info;
+
+  // Analyze the central vertical band (skip top/bottom 25% to avoid headers/footers/titles)
+  const yStart = Math.floor(height * 0.25);
+  const yEnd = Math.floor(height * 0.75);
+  const sampleHeight = yEnd - yStart;
+  if (sampleHeight <= 0 || width <= 100) return null;
+
+  // For each x, calculate the ratio of near-white pixels in the sample band
+  const BRIGHT_THRESHOLD = 200;
+  const brightRatio = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    let count = 0;
+    for (let y = yStart; y < yEnd; y++) {
+      if (data[y * width + x] >= BRIGHT_THRESHOLD) count++;
+    }
+    brightRatio[x] = count / sampleHeight;
+  }
+
+  // Smooth the profile to tolerate noise and thin lines
+  const SMOOTH_RADIUS = Math.max(3, Math.floor(width * 0.005));
+  const smoothed = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    let sum = 0, n = 0;
+    for (let k = Math.max(0, x - SMOOTH_RADIUS); k <= Math.min(width - 1, x + SMOOTH_RADIUS); k++) {
+      sum += brightRatio[k]; n++;
+    }
+    smoothed[x] = sum / n;
+  }
+
+  // Find gutter candidates: continuous high-brightness vertical strips in the inner 80% of width
+  const GUTTER_BRIGHT_THRESHOLD = 0.85;
+  const MIN_GUTTER_PX = Math.max(8, Math.floor(width * 0.015));
+  const margin = Math.floor(width * 0.1);
+  const gutters = [];
+  let gutterStart = -1;
+
+  for (let x = margin; x < width - margin; x++) {
+    if (smoothed[x] >= GUTTER_BRIGHT_THRESHOLD) {
+      if (gutterStart === -1) gutterStart = x;
+    } else if (gutterStart !== -1) {
+      if (x - gutterStart >= MIN_GUTTER_PX) {
+        gutters.push({ left: gutterStart, right: x });
+      }
+      gutterStart = -1;
+    }
+  }
+  if (gutterStart !== -1 && (width - margin) - gutterStart >= MIN_GUTTER_PX) {
+    gutters.push({ left: gutterStart, right: width - margin });
+  }
+
+  if (gutters.length === 0) return null;
+
+  // Build pixel-coordinate column regions from the gutters
+  const MIN_COL_FRACTION = 0.12;
+  const columns = [];
+  let prevRight = 0;
+  for (const g of gutters) {
+    if (g.left - prevRight >= width * MIN_COL_FRACTION) {
+      columns.push({ left: prevRight, right: g.left });
+    }
+    prevRight = g.right;
+  }
+  if (width - prevRight >= width * MIN_COL_FRACTION) {
+    columns.push({ left: prevRight, right: width });
+  }
+
+  return columns.length >= 2 ? { columns, width, height } : null;
+}
+
+async function cropColumnFromImage(base64Image, column, imageHeight) {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+  const cropWidth = Math.max(1, column.right - column.left);
+
+  const croppedBuffer = await sharp(imageBuffer)
+    .extract({ left: column.left, top: 0, width: cropWidth, height: imageHeight })
+    .toBuffer();
+
+  return croppedBuffer.toString('base64');
+}
+
+async function processPageWithGemini(
+  base64Image,
+  mimeType,
+  modelName,
+  processingMode = 'ocr',
+  targetLanguage = '',
+  customPrompt = '',
+  removeReferences = true,
+  singleColumn = false
+) {
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error("Server API Key configuration missing.");
+    throw new Error('Server API Key configuration missing.');
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    
-  const blockProperties = {
-    text: { type: Type.STRING },
-    label: { 
-      type: Type.STRING, 
-      enum: BlockLabelValues 
-    },
-    box_2d: {
-      type: Type.ARRAY,
-      items: { type: Type.NUMBER },
-      description: "Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000"
-    }
-  };
-  const blockRequired = ["text", "label"];
-
-  if (splitColumns) {
-    blockProperties.columnIndex = {
-      type: Type.NUMBER,
-      description: "0-based column number (0 = leftmost)"
-    };
-    blockProperties.readingOrder = {
-      type: Type.NUMBER,
-      description: "Sequential reading order across the entire page (0-based)"
-    };
-    blockRequired.push("columnIndex", "readingOrder");
-  }
-
-  const responseSchema = {
-    type: Type.OBJECT,
-    properties: {
-      blankPage: { type: Type.BOOLEAN },
-      blocks: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: blockProperties,
-          required: blockRequired
-        }
-      }
-    },
-    required: ["blankPage", "blocks"]
-  };
 
   const finalPrompt = buildOcrPrompt({
     processingMode,
     targetLanguage,
     customPrompt,
     removeReferences,
-    splitColumns,
+    singleColumn,
   });
 
   const response = await ai.models.generateContent({
@@ -659,8 +945,33 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
       }
     ],
     config: {
-      responseMimeType: "application/json",
-      responseSchema: responseSchema,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          blankPage: { type: Type.BOOLEAN },
+          blocks: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                text: { type: Type.STRING },
+                label: {
+                  type: Type.STRING,
+                  enum: BlockLabelValues,
+                },
+                box_2d: {
+                  type: Type.ARRAY,
+                  items: { type: Type.NUMBER },
+                  description: 'Bounding box [ymin, xmin, ymax, xmax] normalized 0-1000',
+                },
+              },
+              required: ['text', 'label'],
+            },
+          },
+        },
+        required: ['blankPage', 'blocks'],
+      },
       temperature: 0.1,
       safetySettings: [
         { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -672,9 +983,9 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
   });
 
   const textResponse = typeof response.text === 'function' ? response.text() : response.text;
-  
+
   if (!textResponse) {
-    console.warn("Gemini returned empty text response. Returning empty blocks.");
+    console.warn('Gemini returned empty text response. Returning empty blocks.');
     return { blankPage: false, blocks: [] };
   }
 
@@ -696,11 +1007,147 @@ async function processPageWithGemini(base64Image, mimeType, modelName, processin
   }
 }
 
+async function processPageWithLocalProvider(
+  provider,
+  base64Image,
+  mimeType,
+  modelName,
+  processingMode = 'ocr',
+  targetLanguage = '',
+  customPrompt = '',
+  removeReferences = true,
+  singleColumn = false
+) {
+  const finalPrompt = buildOcrPrompt({
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences,
+    singleColumn,
+  });
+
+  const parsedResponse = await getStructuredOutputFromLocalProvider({
+    provider,
+    modelName,
+    prompt: finalPrompt,
+    responseSchema: OCR_RESPONSE_JSON_SCHEMA,
+    image: {
+      base64Image,
+      mimeType,
+    },
+  });
+
+  const blankPage = parsedResponse?.blankPage === true;
+  const blocks = Array.isArray(parsedResponse?.blocks) ? parsedResponse.blocks : [];
+
+  return {
+    blankPage,
+    blocks: blankPage ? [] : blocks,
+  };
+}
+
+async function processPageWithProvider({
+  provider,
+  base64Image,
+  mimeType,
+  modelName,
+  processingMode = 'ocr',
+  targetLanguage = '',
+  customPrompt = '',
+  removeReferences = true,
+  singleColumn = false,
+}) {
+  if (normalizeOcrProvider(provider) === 'gemini') {
+    return processPageWithGemini(
+      base64Image,
+      mimeType,
+      modelName,
+      processingMode,
+      targetLanguage,
+      customPrompt,
+      removeReferences,
+      singleColumn
+    );
+  }
+
+  return processPageWithLocalProvider(
+    normalizeOcrProvider(provider),
+    base64Image,
+    mimeType,
+    modelName,
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences,
+    singleColumn
+  );
+}
+
+async function processPageWithColumnSplitting({
+  provider,
+  base64Image,
+  mimeType,
+  modelName,
+  processingMode,
+  targetLanguage,
+  customPrompt,
+  removeReferences,
+}) {
+  const detection = await detectColumnsFromImage(base64Image);
+
+  if (!detection || detection.columns.length <= 1) {
+    return processPageWithProvider({
+      provider,
+      base64Image,
+      mimeType,
+      modelName,
+      processingMode,
+      targetLanguage,
+      customPrompt,
+      removeReferences,
+    });
+  }
+
+  console.log(`Detected ${detection.columns.length} columns (px widths: ${detection.columns.map((column) => column.right - column.left).join(', ')}), processing each independently`);
+
+  const allBlocks = [];
+  let isBlankPage = true;
+
+  for (const column of detection.columns) {
+    const croppedBase64 = await cropColumnFromImage(base64Image, column, detection.height);
+    const result = await processPageWithProvider({
+      provider,
+      base64Image: croppedBase64,
+      mimeType,
+      modelName,
+      processingMode,
+      targetLanguage,
+      customPrompt,
+      removeReferences,
+      singleColumn: true,
+    });
+
+    if (!result.blankPage) {
+      isBlankPage = false;
+    }
+
+    if (Array.isArray(result.blocks)) {
+      allBlocks.push(...result.blocks);
+    }
+  }
+
+  return {
+    blankPage: isBlankPage,
+    blocks: isBlankPage ? [] : allBlocks,
+  };
+}
+
 const { processDocumentBackground, resumePendingDocuments } = createDocumentProcessingManager({
   dataDir: DATA_DIR,
   resolveDocumentDir,
   blocksToMarkdown,
   processPage: async ({
+    modelProvider,
     base64Image,
     mimeType,
     modelName,
@@ -709,11 +1156,40 @@ const { processDocumentBackground, resumePendingDocuments } = createDocumentProc
     customPrompt,
     removeReferences,
     splitColumns,
-  }) => processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences, splitColumns),
+  }) => splitColumns
+    ? processPageWithColumnSplitting({
+        provider: modelProvider,
+        base64Image,
+        mimeType,
+        modelName,
+        processingMode,
+        targetLanguage,
+        customPrompt,
+        removeReferences,
+      })
+    : processPageWithProvider({
+        provider: modelProvider,
+        base64Image,
+        mimeType,
+        modelName,
+        processingMode,
+        targetLanguage,
+        customPrompt,
+        removeReferences,
+      }),
 });
 
 app.post('/api/reprocess-page', async (req, res) => {
-  const { docId, pageIndex, modelName, processingMode, targetLanguage, customPrompt, removeReferences } = req.body;
+  const {
+    docId,
+    pageIndex,
+    modelName,
+    modelProvider,
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences,
+  } = req.body;
   
   try {
     const safeDocId = assertDocumentId(docId);
@@ -731,6 +1207,7 @@ app.post('/api/reprocess-page', async (req, res) => {
 
     const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
     normalizeDocumentRuntimeState(docData);
+    docData.ocrProvider = normalizeOcrProvider(docData.ocrProvider);
     const page = docData.pages[parsedPageIndex];
     
     if (!page) {
@@ -752,22 +1229,26 @@ app.post('/api/reprocess-page', async (req, res) => {
     const base64Image = imageBuffer.toString('base64');
     const mimeType = path.extname(filename) === '.png' ? 'image/png' : 'image/jpeg';
 
-    console.log(`Calling Gemini for reprocessing... Model: ${modelName || 'default'}`);
+    console.log(`Calling OCR provider for reprocessing... Provider: ${normalizeOcrProvider(modelProvider || docData.ocrProvider)}, Model: ${modelName || 'default'}`);
+    const nextProvider = normalizeOcrProvider(modelProvider || docData.ocrProvider);
 
     try {
-      const result = await processPageWithGemini(
+      const result = await processPageWithProvider({
+        provider: nextProvider,
         base64Image,
         mimeType,
         modelName,
         processingMode,
         targetLanguage,
         customPrompt,
-        removeReferences !== false
-      );
+        removeReferences: removeReferences !== false,
+      });
       const blocks = Array.isArray(result?.blocks) ? result.blocks : [];
 
-      console.log(`Gemini reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
+      console.log(`OCR reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
 
+      docData.modelUsed = modelName || docData.modelUsed || DEFAULT_MODEL_ID;
+      docData.ocrProvider = nextProvider;
       docData.pages[parsedPageIndex].blocks = blocks;
       docData.pages[parsedPageIndex].status = 'completed';
       docData.pages[parsedPageIndex].blankPage = result?.blankPage === true;
@@ -803,7 +1284,7 @@ app.post('/api/reprocess-page', async (req, res) => {
 });
 
 app.post('/api/reprocess-document', async (req, res) => {
-  const { docId, modelName, pagesPerBatch, splitColumns } = req.body;
+  const { docId, modelName, modelProvider, pagesPerBatch, splitColumns } = req.body;
 
   try {
     const safeDocId = assertDocumentId(docId);
@@ -821,6 +1302,7 @@ app.post('/api/reprocess-document', async (req, res) => {
     }
 
     normalizeDocumentRuntimeState(docData);
+    docData.ocrProvider = normalizeOcrProvider(docData.ocrProvider);
     docData.isRead = docData.isRead === true;
     const availableLabels = await readLabels();
     docData.labels = normalizeDocumentLabels(docData.labels).filter((label) =>
@@ -836,13 +1318,19 @@ app.post('/api/reprocess-document', async (req, res) => {
     }
 
     docData.modelUsed = nextModelName || DEFAULT_MODEL_ID;
+    docData.ocrProvider = normalizeOcrProvider(modelProvider || docData.ocrProvider);
     docData.pagesPerBatch = getPagesPerBatch(pagesPerBatch, docData.pagesPerBatch);
     docData.splitColumns = splitColumns === true;
     if (docData.labels.length === 0) {
       const labelingSettings = await readLabelingSettings();
       if (labelingSettings.autoLabelDocuments && availableLabels.length > 0) {
         try {
-          docData.labels = await selectLabelsForDocumentName(docData.name, availableLabels, docData.modelUsed);
+          docData.labels = await selectLabelsForDocumentName(
+            docData.name,
+            availableLabels,
+            docData.modelUsed,
+            docData.ocrProvider
+          );
         } catch (labelingError) {
           console.error(`Automatic labeling failed during reprocessing for "${docData.name}"`, labelingError);
         }
@@ -890,7 +1378,16 @@ app.post('/api/reprocess-document', async (req, res) => {
 });
 
 app.post('/api/process-page', async (req, res) => {
-  const { base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences } = req.body;
+  const {
+    base64Image,
+    mimeType,
+    modelName,
+    modelProvider,
+    processingMode,
+    targetLanguage,
+    customPrompt,
+    removeReferences,
+  } = req.body;
 
   try {
     if (typeof base64Image !== 'string' || !base64Image.trim()) {
@@ -901,7 +1398,16 @@ app.post('/api/process-page', async (req, res) => {
       throw createPublicError(400, 'Unsupported image type');
     }
 
-    const result = await processPageWithGemini(base64Image, mimeType, modelName, processingMode, targetLanguage, customPrompt, removeReferences !== false);
+    const result = await processPageWithProvider({
+      provider: normalizeOcrProvider(modelProvider),
+      base64Image,
+      mimeType,
+      modelName,
+      processingMode,
+      targetLanguage,
+      customPrompt,
+      removeReferences: removeReferences !== false,
+    });
     const blocks = Array.isArray(result?.blocks) ? result.blocks : [];
     
     // Try to save to Markdown file (legacy logic, kept for compatibility if needed)
@@ -992,6 +1498,7 @@ app.get('/api/documents', async (req, res) => {
           const parsedItem = JSON.parse(data);
           if (parsedItem?.type === 'file') {
             normalizeDocumentRuntimeState(parsedItem);
+            parsedItem.ocrProvider = normalizeOcrProvider(parsedItem.ocrProvider);
             parsedItem.isRead = parsedItem.isRead === true;
             parsedItem.labels = normalizeDocumentLabels(parsedItem.labels);
           }
@@ -1022,6 +1529,7 @@ app.post('/api/documents', async (req, res) => {
     }
 
     if (item.type === 'file') {
+      item.ocrProvider = normalizeOcrProvider(item.ocrProvider);
       const availableLabels = await readLabels();
       item.labels = normalizeDocumentLabels(item.labels).filter((label) =>
         availableLabels.some((availableLabel) => availableLabel.toLowerCase() === label.toLowerCase())
@@ -1031,7 +1539,12 @@ app.post('/api/documents', async (req, res) => {
         const labelingSettings = await readLabelingSettings();
         if (labelingSettings.autoLabelDocuments && availableLabels.length > 0) {
           try {
-            item.labels = await selectLabelsForDocumentName(item.name, availableLabels, item.modelUsed || DEFAULT_MODEL_ID);
+            item.labels = await selectLabelsForDocumentName(
+              item.name,
+              availableLabels,
+              item.modelUsed || DEFAULT_MODEL_ID,
+              item.ocrProvider
+            );
           } catch (labelingError) {
             console.error(`Automatic labeling failed for "${item.name}"`, labelingError);
           }
@@ -1046,6 +1559,7 @@ app.post('/api/documents', async (req, res) => {
 
     // Handle image saving for files
     if (item.type === 'file' && item.pages && Array.isArray(item.pages)) {
+      item.ocrProvider = normalizeOcrProvider(item.ocrProvider);
       item.isRead = item.isRead === true;
       item.pagesPerBatch = getPagesPerBatch(item.pagesPerBatch);
       for (let i = 0; i < item.pages.length; i++) {

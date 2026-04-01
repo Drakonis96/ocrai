@@ -23,7 +23,7 @@ import { reprocessPage } from '../../services/geminiService';
 import ProcessingOptionsSelector from '../ProcessingOptionsSelector';
 import IconActionButton from '../IconActionButton';
 import DocumentNameDialog from '../DocumentNameDialog';
-import { DEFAULT_MODEL_ID, GeminiModel, getPreferredDefaultModelId } from '../../utils/modelStorage';
+import { DEFAULT_MODEL_ID, GeminiModel, OcrProvider, getPreferredDefaultModelId } from '../../utils/modelStorage';
 import { getIssuePageIndexes, getPageIssueType } from '../../utils/pageReview';
 import { downloadBlob } from '../../utils/download';
 
@@ -33,6 +33,7 @@ interface EditorViewProps {
   onPersistDocument: (doc: DocumentData) => Promise<DocumentData>;
   onRefreshDocument: (docId: string) => Promise<DocumentData | null>;
   models: GeminiModel[];
+  activeOcrProvider: OcrProvider;
   prompts: PromptPreset[];
   onOpenSettings: (tab?: SettingsTab) => void;
 }
@@ -48,6 +49,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   onPersistDocument,
   onRefreshDocument,
   models,
+  activeOcrProvider,
   prompts,
   onOpenSettings,
 }) => {
@@ -84,6 +86,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [reprocessOptions, setReprocessOptions] = useState<ProcessingOptions>({
     model: DEFAULT_MODEL_ID,
+    ocrProvider: activeOcrProvider,
     processingMode: 'ocr',
     targetLanguage: 'Español',
     customPrompt: '',
@@ -155,21 +158,23 @@ const EditorView: React.FC<EditorViewProps> = ({
 
   useEffect(() => {
     if (models.length === 0) {
+      setReprocessOptions((current) => ({ ...current, ocrProvider: activeOcrProvider }));
       return;
     }
 
     setReprocessOptions((current) => {
       const modelStillAvailable = models.some((model) => model.id === current.model);
       if (modelStillAvailable) {
-        return current;
+        return { ...current, ocrProvider: activeOcrProvider };
       }
 
       return {
         ...current,
+        ocrProvider: activeOcrProvider,
         model: getPreferredDefaultModelId(models),
       };
     });
-  }, [models]);
+  }, [activeOcrProvider, models]);
 
   useEffect(() => {
     if (!isResizing || isMobileLayout) {
@@ -489,6 +494,7 @@ const EditorView: React.FC<EditorViewProps> = ({
             docId,
             pageIndex,
             reprocessOptions.model,
+            activeOcrProvider,
             reprocessOptions.processingMode,
             reprocessOptions.targetLanguage,
             reprocessOptions.customPrompt,

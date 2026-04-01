@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useEffect, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Login } from './components/Login';
 import UploadView from './components/UploadView';
 import Dashboard from './components/Dashboard';
@@ -22,7 +22,18 @@ import { reconstructCleanText } from './utils/reconstruction';
 import { markdownToPlainText } from './utils/richText';
 import { deleteItem, getAllItems, nukeDB, saveItem } from './utils/storage';
 import { MOCK_ID_PREFIX } from './constants';
-import { addModel, DEFAULT_MODELS, GeminiModel, getModels, removeModel } from './utils/modelStorage';
+import {
+  addModel,
+  DEFAULT_MODELS,
+  DEFAULT_OCR_SETTINGS,
+  GeminiModel,
+  OcrProvider,
+  OcrSettings,
+  getModels,
+  getProviderModels,
+  removeModel,
+  sortModelsForPreferredSelection,
+} from './utils/modelStorage';
 import { createPrompt, deletePrompt, getPrompts, updatePrompt } from './services/promptService';
 import {
   createLabel,
@@ -31,6 +42,11 @@ import {
   getLabels,
   updateLabelingSettings,
 } from './services/labelingService';
+import {
+  autodetectProviderModels,
+  getOcrSettings,
+  updateOcrSettings,
+} from './services/ocrSettingsService';
 import { reprocessDocument } from './services/geminiService';
 import { getPdfRenderConcurrency } from './utils/pdfProcessing';
 import { downloadBlob } from './utils/download';
@@ -102,6 +118,7 @@ const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>('models');
   const [models, setModels] = useState<GeminiModel[]>(DEFAULT_MODELS);
+  const [ocrSettings, setOcrSettings] = useState<OcrSettings>(DEFAULT_OCR_SETTINGS);
   const [prompts, setPrompts] = useState<PromptPreset[]>([]);
   const [availableLabels, setAvailableLabels] = useState<string[]>([]);
   const [labelingSettings, setLabelingSettings] = useState<LabelingSettings>({ autoLabelDocuments: false });
@@ -130,19 +147,22 @@ const App: React.FC = () => {
 
   const loadSettings = useCallback(async () => {
     try {
-      const [availableModels, savedPrompts, labels, nextLabelingSettings] = await Promise.all([
+      const [availableModels, nextOcrSettings, savedPrompts, labels, nextLabelingSettings] = await Promise.all([
         getModels(),
+        getOcrSettings(),
         getPrompts(),
         getLabels(),
         getLabelingSettings(),
       ]);
       setModels(availableModels);
+      setOcrSettings(nextOcrSettings);
       setPrompts(savedPrompts);
       setAvailableLabels(labels);
       setLabelingSettings(nextLabelingSettings);
     } catch (error) {
       console.error('Failed to load settings', error);
       setModels(DEFAULT_MODELS);
+      setOcrSettings(DEFAULT_OCR_SETTINGS);
       setPrompts([]);
       setAvailableLabels([]);
       setLabelingSettings({ autoLabelDocuments: false });
@@ -242,8 +262,8 @@ const App: React.FC = () => {
     setModels(updatedModels);
   };
 
-  const handleRemoveModel = async (modelId: string) => {
-    const updatedModels = await removeModel(modelId);
+  const handleRemoveModel = async (modelId: string, provider?: OcrProvider) => {
+    const updatedModels = await removeModel(modelId, provider);
     setModels(updatedModels);
   };
 
@@ -286,6 +306,17 @@ const App: React.FC = () => {
   const handleUpdateLabelingSettings = async (nextSettings: LabelingSettings) => {
     const updatedSettings = await updateLabelingSettings(nextSettings);
     setLabelingSettings(updatedSettings);
+  };
+
+  const handleUpdateOcrSettings = async (nextSettings: OcrSettings) => {
+    const updatedSettings = await updateOcrSettings(nextSettings);
+    setOcrSettings(updatedSettings);
+  };
+
+  const handleAutodetectProviderModels = async (provider: OcrProvider, nextSettings: OcrSettings = ocrSettings) => {
+    const response = await autodetectProviderModels(provider, nextSettings);
+    setModels(response.models);
+    setOcrSettings(response.settings);
   };
 
   const fileToBase64 = (file: File): Promise<string> => {
@@ -545,6 +576,7 @@ const App: React.FC = () => {
           uploadDate: Date.now(),
           status: 'processing',
           modelUsed: options.model,
+          ocrProvider: options.ocrProvider ?? ocrSettings.provider,
           isRead: false,
           labels: [],
           processingMode: options.processingMode,
@@ -640,14 +672,28 @@ const App: React.FC = () => {
       ? pagesPerBatch
       : (Number.isInteger(currentDoc.pagesPerBatch) && (currentDoc.pagesPerBatch ?? 0) > 0 ? currentDoc.pagesPerBatch ?? 1 : 1);
 
-    const updatedDoc = await reprocessDocument(docId, modelName, normalizedPagesPerBatch, splitColumns);
+    const updatedDoc = await reprocessDocument(
+      docId,
+      modelName,
+      normalizedPagesPerBatch,
+      splitColumns,
+      ocrSettings.provider
+    );
     setItems((current) => current.map((entry) => (entry.id === updatedDoc.id ? updatedDoc : entry)));
-  }, []);
+  }, [ocrSettings.provider]);
 
   const goToHome = () => {
     setCurrentView(AppView.DASHBOARD);
     setCurrentFolderId(null);
   };
+
+  const processingModels = useMemo(
+    () => sortModelsForPreferredSelection(
+      getProviderModels(models, ocrSettings.provider),
+      ocrSettings.selectedModelId
+    ),
+    [models, ocrSettings.provider, ocrSettings.selectedModelId]
+  );
 
   const activeDoc = items.find((item) => item.id === activeDocId) as DocumentData | undefined;
 
@@ -746,7 +792,8 @@ const App: React.FC = () => {
             {currentView === AppView.UPLOAD && (
               <UploadView
                 onFileSelect={handleFileSelect}
-                models={models}
+                models={processingModels}
+                activeOcrProvider={ocrSettings.provider}
                 prompts={prompts}
                 onOpenSettings={openSettings}
               />
@@ -755,7 +802,7 @@ const App: React.FC = () => {
             {currentView === AppView.DASHBOARD && (
               <Dashboard
                 items={items}
-                models={models}
+                models={processingModels}
                 availableLabels={availableLabels}
                 currentFolderId={currentFolderId}
                 onOpenDocument={handleOpenDocument}
@@ -778,7 +825,8 @@ const App: React.FC = () => {
                 onBack={() => setCurrentView(AppView.DASHBOARD)}
                 onPersistDocument={handlePersistDocument}
                 onRefreshDocument={handleRefreshDocument}
-                models={models}
+                models={processingModels}
+                activeOcrProvider={ocrSettings.provider}
                 prompts={prompts}
                 onOpenSettings={openSettings}
               />
@@ -879,17 +927,20 @@ const App: React.FC = () => {
         onTabChange={setActiveSettingsTab}
         onClose={() => setIsSettingsOpen(false)}
         models={models}
+        ocrSettings={ocrSettings}
         prompts={prompts}
         availableLabels={availableLabels}
         labelingSettings={labelingSettings}
         onAddModel={handleAddModel}
         onRemoveModel={handleRemoveModel}
+        onAutodetectProviderModels={handleAutodetectProviderModels}
         onCreatePrompt={handleCreatePrompt}
         onUpdatePrompt={handleUpdatePrompt}
         onDeletePrompt={handleDeletePrompt}
         onCreateLabel={handleCreateLabel}
         onDeleteLabel={handleDeleteLabel}
         onUpdateLabelingSettings={handleUpdateLabelingSettings}
+        onUpdateOcrSettings={handleUpdateOcrSettings}
       />
     </div>
   );

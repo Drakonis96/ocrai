@@ -10,6 +10,9 @@ interface ProcessingOptionsSelectorProps {
   prompts: PromptPreset[];
   onOpenSettings?: (tab?: SettingsTab) => void;
   showBatchSizeOption?: boolean;
+  selectedFileCount?: number;
+  selectedPageCount?: number | null;
+  hasPendingPageCount?: boolean;
 }
 
 const LANGUAGES = [
@@ -31,6 +34,9 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
   prompts,
   onOpenSettings,
   showBatchSizeOption = false,
+  selectedFileCount = 0,
+  selectedPageCount = null,
+  hasPendingPageCount = false,
 }) => {
   const [selectedPromptId, setSelectedPromptId] = useState('');
   const [batchSizeChoice, setBatchSizeChoice] = useState('1');
@@ -85,19 +91,47 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
         <select
           value={options.model}
           onChange={(event) => updateOption('model', event.target.value)}
+          disabled={models.length === 0}
           className="w-full rounded-2xl border border-slate-300 bg-white p-3 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
         >
-          {models.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.name} ({model.description}){model.isCustom ? ' ★' : ''}
-            </option>
-          ))}
+          {models.length === 0 ? (
+            <option value="">No models available</option>
+          ) : (
+            models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name} ({model.description}){model.isCustom ? ' ★' : ''}{model.isAutodetected ? ' • Auto' : ''}
+              </option>
+            ))
+          )}
         </select>
+        {models.length === 0 && (
+          <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+            No models are available for the active OCR provider. Open Settings and detect or add one first.
+          </p>
+        )}
       </div>
 
       {showBatchSizeOption && (
         <div>
           <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Pages Processed At Once</label>
+          {selectedFileCount > 0 && (
+            <div
+              data-testid="selected-pages-summary"
+              className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300"
+            >
+              {hasPendingPageCount ? (
+                <span>Counting pages for the selected {selectedFileCount === 1 ? 'document' : 'files'}...</span>
+              ) : selectedPageCount !== null ? (
+                <span>
+                  {selectedFileCount === 1
+                    ? `Selected document: ${selectedPageCount} page${selectedPageCount === 1 ? '' : 's'}.`
+                    : `Selected files: ${selectedFileCount} files, ${selectedPageCount} total pages.`}
+                </span>
+              ) : (
+                <span>Page count unavailable for one or more selected files.</span>
+              )}
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)]">
             <select
               value={batchSizeChoice}

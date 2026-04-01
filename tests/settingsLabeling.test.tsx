@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SettingsModal from '../components/SettingsModal';
 
 const MODELS = [
-  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite Latest', description: 'Cheapest' },
+  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash Lite Latest', description: 'Cheapest', provider: 'gemini' },
 ];
 
 describe('Settings labeling tab', () => {
@@ -40,11 +40,19 @@ describe('Settings labeling tab', () => {
           onTabChange={onTabChange}
           onClose={vi.fn()}
           models={MODELS}
+          ocrSettings={{
+            provider: 'gemini',
+            selectedModelId: 'gemini-flash-lite-latest',
+            lmStudio: { host: '127.0.0.1', port: 1234 },
+            ollama: { host: '127.0.0.1', port: 11434 },
+          }}
           prompts={[]}
           availableLabels={[]}
           labelingSettings={{ autoLabelDocuments: false }}
           onAddModel={vi.fn(async () => {})}
           onRemoveModel={vi.fn(async () => {})}
+          onAutodetectProviderModels={vi.fn(async () => {})}
+          onUpdateOcrSettings={vi.fn(async () => {})}
           onCreatePrompt={vi.fn(async () => {})}
           onUpdatePrompt={vi.fn(async () => {})}
           onDeletePrompt={vi.fn(async () => {})}
@@ -81,11 +89,19 @@ describe('Settings labeling tab', () => {
           onTabChange={vi.fn()}
           onClose={vi.fn()}
           models={MODELS}
+          ocrSettings={{
+            provider: 'gemini',
+            selectedModelId: 'gemini-flash-lite-latest',
+            lmStudio: { host: '127.0.0.1', port: 1234 },
+            ollama: { host: '127.0.0.1', port: 11434 },
+          }}
           prompts={[]}
           availableLabels={['Finance']}
           labelingSettings={{ autoLabelDocuments: true }}
           onAddModel={vi.fn(async () => {})}
           onRemoveModel={vi.fn(async () => {})}
+          onAutodetectProviderModels={vi.fn(async () => {})}
+          onUpdateOcrSettings={vi.fn(async () => {})}
           onCreatePrompt={vi.fn(async () => {})}
           onUpdatePrompt={vi.fn(async () => {})}
           onDeletePrompt={vi.fn(async () => {})}

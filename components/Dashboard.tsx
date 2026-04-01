@@ -46,12 +46,16 @@ interface DashboardProps {
 
 type SortKey = 'name' | 'date' | 'status';
 type SortDirection = 'asc' | 'desc';
+type DashboardStatusFilter = 'all' | DocumentData['status'];
 
 const DOCUMENTS_PER_PAGE_OPTIONS = [10, 15, 25, 50, 100, 150];
 const DEFAULT_DOCUMENTS_PER_PAGE = 15;
 const SCROLL_TOP_VISIBILITY_OFFSET = 320;
 const ROOT_FOLDER_LABEL = 'Main / Root';
 const EMPTY_LABELS: string[] = [];
+const FOLDER_FILTER_CURRENT = '__current__';
+const FOLDER_FILTER_ALL = '__all__';
+const FOLDER_FILTER_ROOT = '__root__';
 
 const STATUS_ORDER: Record<DocumentData['status'], number> = {
   uploading: 0,
@@ -65,6 +69,38 @@ const canReprocessDocument = (doc: DocumentData) => doc.status === 'ready' || do
 
 const getFailedPagesLabel = (failedPages: number) =>
   failedPages === 1 ? '1 failed page' : `${failedPages} failed pages`;
+
+const parseDateFilterTimestamp = (value: string, endOfDay: boolean = false) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsedDate = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`);
+  const timestamp = parsedDate.getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+};
+
+const getDocumentSearchText = (doc: DocumentData) => {
+  const savedDocumentText = typeof doc.savedText === 'string' ? doc.savedText.trim() : '';
+  if (savedDocumentText) {
+    return savedDocumentText;
+  }
+
+  const savedPageText = Object.entries(doc.pageSavedTexts ?? {})
+    .sort(([leftPage], [rightPage]) => Number(leftPage) - Number(rightPage))
+    .map(([, text]) => text.trim())
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (savedPageText) {
+    return savedPageText;
+  }
+
+  return doc.pages
+    .flatMap((page) => page.blocks.map((block) => block.text.trim()))
+    .filter(Boolean)
+    .join('\n\n');
+};
 
 const getPaginationTokens = (currentPage: number, totalPages: number): Array<number | 'ellipsis'> => {
   if (totalPages <= 1) {
@@ -120,6 +156,12 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isFullTextSearchEnabled, setIsFullTextSearchEnabled] = useState(false);
+  const [selectedLabelFilter, setSelectedLabelFilter] = useState('');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<DashboardStatusFilter>('all');
+  const [selectedFolderFilter, setSelectedFolderFilter] = useState(FOLDER_FILTER_CURRENT);
+  const [dateFromFilter, setDateFromFilter] = useState('');
+  const [dateToFilter, setDateToFilter] = useState('');
   const [documentsPerPage, setDocumentsPerPage] = useState(DEFAULT_DOCUMENTS_PER_PAGE);
   const [currentPage, setCurrentPage] = useState(1);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
@@ -140,16 +182,66 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [isSavingLabels, setIsSavingLabels] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-  const visibleItems = items.filter((item) => item.parentId === currentFolderId);
-  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
-  const filteredVisibleItems = visibleItems.filter((item) => (
-    normalizedSearchQuery.length === 0
-      ? true
-      : item.name.toLocaleLowerCase().includes(normalizedSearchQuery)
-  ));
-
   const compareText = (left: string, right: string) =>
     left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true });
+
+  const allFolders = items.filter((item): item is FolderData => item.type === 'folder');
+  const foldersById = new Map(allFolders.map((folder) => [folder.id, folder]));
+  const allDocuments = items.filter((item): item is DocumentData => item.type === 'file');
+  const availableFilterLabels = Array.from(new Set(
+    [...availableLabels, ...allDocuments.flatMap((doc) => doc.labels ?? [])]
+      .map((label) => label.trim())
+      .filter(Boolean)
+  )).sort(compareText);
+
+  const getFolderPathLabel = (folderId: string) => {
+    const names: string[] = [];
+    let currentId: string | null = folderId;
+
+    while (currentId) {
+      const folder = foldersById.get(currentId);
+      if (!folder) {
+        break;
+      }
+
+      names.unshift(folder.name);
+      currentId = folder.parentId;
+    }
+
+    return names.join(' / ');
+  };
+
+  const folderFilterOptions = (() => {
+    const options = [
+      {
+        value: FOLDER_FILTER_CURRENT,
+        label: currentFolderId ? `Current folder: ${getFolderPathLabel(currentFolderId)}` : `Current folder: ${ROOT_FOLDER_LABEL}`,
+      },
+      {
+        value: FOLDER_FILTER_ALL,
+        label: 'All folders',
+      },
+    ];
+
+    if (currentFolderId !== null) {
+      options.push({
+        value: FOLDER_FILTER_ROOT,
+        label: ROOT_FOLDER_LABEL,
+      });
+    }
+
+    allFolders
+      .filter((folder) => folder.id !== currentFolderId)
+      .sort((left, right) => compareText(getFolderPathLabel(left.id), getFolderPathLabel(right.id)))
+      .forEach((folder) => {
+        options.push({
+          value: folder.id,
+          label: getFolderPathLabel(folder.id),
+        });
+      });
+
+    return options;
+  })();
 
   const getItemDate = (item: FileSystemItem) =>
     item.type === 'folder' ? item.createdAt : (item as DocumentData).uploadDate || item.createdAt;
@@ -169,6 +261,83 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     return document.processedPages / document.totalPages;
   };
+
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
+  const dateFromTimestamp = parseDateFilterTimestamp(dateFromFilter);
+  const dateToTimestamp = parseDateFilterTimestamp(dateToFilter, true);
+  const hasDocumentOnlyFilters = (
+    selectedLabelFilter.length > 0
+    || selectedStatusFilter !== 'all'
+    || dateFromTimestamp !== null
+    || dateToTimestamp !== null
+  );
+  const hasFullTextQuery = isFullTextSearchEnabled && normalizedSearchQuery.length > 0;
+  const hasActiveSearchOrFilters = (
+    normalizedSearchQuery.length > 0
+    || hasDocumentOnlyFilters
+    || selectedFolderFilter !== FOLDER_FILTER_CURRENT
+  );
+
+  const visibleItems = (() => {
+    if (selectedFolderFilter === FOLDER_FILTER_ALL) {
+      return items;
+    }
+
+    const targetParentId = selectedFolderFilter === FOLDER_FILTER_CURRENT
+      ? currentFolderId
+      : selectedFolderFilter === FOLDER_FILTER_ROOT
+        ? null
+        : selectedFolderFilter;
+
+    return items.filter((item) => item.parentId === targetParentId);
+  })();
+
+  const filteredVisibleItems = visibleItems.filter((item) => {
+    const nameMatches = normalizedSearchQuery.length === 0
+      || item.name.toLocaleLowerCase().includes(normalizedSearchQuery);
+
+    if (item.type === 'folder') {
+      if (hasDocumentOnlyFilters || hasFullTextQuery) {
+        return false;
+      }
+
+      return nameMatches;
+    }
+
+    const doc = item as DocumentData;
+
+    if (selectedLabelFilter) {
+      const matchesLabel = (doc.labels ?? []).some(
+        (label) => label.toLocaleLowerCase() === selectedLabelFilter.toLocaleLowerCase()
+      );
+      if (!matchesLabel) {
+        return false;
+      }
+    }
+
+    if (selectedStatusFilter !== 'all' && doc.status !== selectedStatusFilter) {
+      return false;
+    }
+
+    const documentTimestamp = getItemDate(doc);
+    if (dateFromTimestamp !== null && documentTimestamp < dateFromTimestamp) {
+      return false;
+    }
+
+    if (dateToTimestamp !== null && documentTimestamp > dateToTimestamp) {
+      return false;
+    }
+
+    if (normalizedSearchQuery.length === 0) {
+      return true;
+    }
+
+    if (!isFullTextSearchEnabled) {
+      return nameMatches;
+    }
+
+    return nameMatches || getDocumentSearchText(doc).toLocaleLowerCase().includes(normalizedSearchQuery);
+  });
 
   const sortedVisibleItems = [...filteredVisibleItems].sort((left, right) => {
     let comparison = 0;
@@ -220,9 +389,6 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     return path;
   };
-
-  const allFolders = items.filter((item): item is FolderData => item.type === 'folder');
-  const foldersById = new Map(allFolders.map((folder) => [folder.id, folder]));
   const moveItem = moveItemId ? (items.find((item) => item.id === moveItemId) ?? null) : null;
   const reprocessDocumentItem = reprocessDocumentId
     ? (items.find((item) => item.type === 'file' && item.id === reprocessDocumentId) as DocumentData | undefined) ?? null
@@ -230,23 +396,6 @@ const Dashboard: React.FC<DashboardProps> = ({
   const labelDocumentItem = labelDocumentId
     ? (items.find((item) => item.type === 'file' && item.id === labelDocumentId) as DocumentData | undefined) ?? null
     : null;
-
-  const getFolderPathLabel = (folderId: string) => {
-    const names: string[] = [];
-    let currentId: string | null = folderId;
-
-    while (currentId) {
-      const folder = foldersById.get(currentId);
-      if (!folder) {
-        break;
-      }
-
-      names.unshift(folder.name);
-      currentId = folder.parentId;
-    }
-
-    return names.join(' / ');
-  };
 
   const isFolderWithinMovedTree = (folderId: string, movedFolderId: string) => {
     let currentId: string | null = folderId;
@@ -560,7 +709,19 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [currentFolderId, normalizedSearchQuery, sortKey, sortDirection, documentsPerPage]);
+  }, [
+    currentFolderId,
+    normalizedSearchQuery,
+    isFullTextSearchEnabled,
+    selectedLabelFilter,
+    selectedStatusFilter,
+    selectedFolderFilter,
+    dateFromFilter,
+    dateToFilter,
+    sortKey,
+    sortDirection,
+    documentsPerPage,
+  ]);
 
   useEffect(() => {
     setCurrentPage((page) => Math.min(page, totalPages));
@@ -587,18 +748,32 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, []);
 
   const breadcrumbs = getBreadcrumbs();
+  const resetFilters = useCallback(() => {
+    setSearchQuery('');
+    setIsFullTextSearchEnabled(false);
+    setSelectedLabelFilter('');
+    setSelectedStatusFilter('all');
+    setSelectedFolderFilter(FOLDER_FILTER_CURRENT);
+    setDateFromFilter('');
+    setDateToFilter('');
+  }, []);
 
   return (
     <div
       ref={scrollContainerRef}
       data-testid="dashboard-scroll-container"
-      className="relative flex-1 min-h-0 overflow-y-auto"
+      className="relative min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
     >
       <div className="mx-auto max-w-7xl px-4 py-5 pb-24 sm:px-6 sm:py-8 sm:pb-28">
         <div className="mb-6 flex flex-col gap-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-400 sm:text-base">
+          <div
+            data-testid="dashboard-primary-toolbar"
+            className="flex flex-wrap items-center gap-3 lg:flex-nowrap"
+          >
+            <div className="flex shrink-0 items-center gap-2 text-sm text-slate-600 dark:text-slate-400 sm:text-base">
               <button
+                type="button"
+                aria-label="Home"
                 onClick={() => onNavigateFolder(null)}
                 onDragOver={handleDragOver}
                 onDrop={(event) => handleDropOnBreadcrumb(event, null)}
@@ -610,25 +785,28 @@ const Dashboard: React.FC<DashboardProps> = ({
               >
                 <HomeIcon className="h-4 w-4" />
               </button>
+            </div>
 
-              {breadcrumbs.map((folder) => (
-                <React.Fragment key={folder.id}>
-                  <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-600" />
+            <div className="min-w-[15rem] flex-1">
+              <div className="relative w-full">
+                <input
+                  type="search"
+                  aria-label="Search documents"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder={isFullTextSearchEnabled ? 'Search document names and content' : 'Search documents by name'}
+                  className="h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 pr-24 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+                {searchQuery && (
                   <button
-                    onClick={() => onNavigateFolder(folder.id)}
-                    onDragOver={handleDragOver}
-                    onDrop={(event) => handleDropOnBreadcrumb(event, folder.id)}
-                    title={folder.name}
-                    className={`inline-flex h-11 items-center whitespace-nowrap rounded-full px-3 py-2 transition-colors ${
-                      currentFolderId === folder.id
-                        ? 'bg-slate-200 font-semibold text-slate-900 dark:bg-slate-700 dark:text-white'
-                        : 'hover:text-blue-600 dark:hover:text-blue-400'
-                    }`}
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full px-2.5 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                   >
-                    {folder.name}
+                    Clear
                   </button>
-                </React.Fragment>
-              ))}
+                )}
+              </div>
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -648,29 +826,139 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,18rem)_auto] lg:items-center lg:justify-between">
-            <div className="relative w-full lg:max-w-[26rem]">
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search documents by name"
-                className="h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 pr-24 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full px-2.5 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                >
-                  Clear
-                </button>
-              )}
+          {breadcrumbs.length > 0 && (
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-400 sm:text-base">
+              {breadcrumbs.map((folder, index) => (
+                <React.Fragment key={folder.id}>
+                  {index > 0 && (
+                    <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-600" />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onNavigateFolder(folder.id)}
+                    onDragOver={handleDragOver}
+                    onDrop={(event) => handleDropOnBreadcrumb(event, folder.id)}
+                    title={folder.name}
+                    className={`inline-flex h-10 items-center whitespace-nowrap rounded-full px-3 py-2 transition-colors ${
+                      currentFolderId === folder.id
+                        ? 'bg-slate-200 font-semibold text-slate-900 dark:bg-slate-700 dark:text-white'
+                        : 'hover:text-blue-600 dark:hover:text-blue-400'
+                    }`}
+                  >
+                    {folder.name}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)] xl:items-start">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex min-h-11 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-2 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800">
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Full text</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isFullTextSearchEnabled}
+                    aria-label="Enable full text search"
+                    onClick={() => setIsFullTextSearchEnabled((currentValue) => !currentValue)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      isFullTextSearchEnabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                        isFullTextSearchEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    Search inside OCR text and saved edits
+                  </span>
+                </label>
+
+                {hasActiveSearchOrFilters && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="inline-flex min-h-11 items-center rounded-2xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
+                  >
+                    Reset filters
+                  </button>
+                )}
+              </div>
             </div>
 
-            <p className="text-sm text-slate-500 dark:text-slate-400 lg:justify-self-end">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <select
+                aria-label="Filter by label"
+                value={selectedLabelFilter}
+                onChange={(event) => setSelectedLabelFilter(event.target.value)}
+                className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              >
+                <option value="">All labels</option>
+                {availableFilterLabels.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label="Filter by status"
+                value={selectedStatusFilter}
+                onChange={(event) => setSelectedStatusFilter(event.target.value as DashboardStatusFilter)}
+                className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              >
+                <option value="all">All statuses</option>
+                <option value="uploading">Uploading</option>
+                <option value="processing">Processing</option>
+                <option value="ready">Ready</option>
+                <option value="error">Error</option>
+              </select>
+
+              <select
+                aria-label="Filter by folder"
+                value={selectedFolderFilter}
+                onChange={(event) => setSelectedFolderFilter(event.target.value)}
+                className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white sm:col-span-2 xl:col-span-1"
+              >
+                {folderFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="date"
+                aria-label="Filter from date"
+                value={dateFromFilter}
+                onChange={(event) => setDateFromFilter(event.target.value)}
+                className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+
+              <input
+                type="date"
+                aria-label="Filter to date"
+                value={dateToFilter}
+                onChange={(event) => setDateToFilter(event.target.value)}
+                className="h-11 rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               {sortedVisibleItems.length} result{sortedVisibleItems.length === 1 ? '' : 's'}
             </p>
+
+            {isFullTextSearchEnabled && normalizedSearchQuery.length > 0 && (
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Full-text search is active.
+              </p>
+            )}
           </div>
         </div>
 
@@ -737,14 +1025,16 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {sortedVisibleItems.length === 0 && !isCreatingFolder ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-20 text-center transition-colors dark:border-slate-700 dark:bg-slate-800">
-            {normalizedSearchQuery ? (
+            {hasActiveSearchOrFilters ? (
               <>
-                <p className="text-slate-500 dark:text-slate-400">No documents match "{searchQuery}".</p>
+                <p className="text-slate-500 dark:text-slate-400">
+                  No items match the current search or filters.
+                </p>
                 <button
-                  onClick={() => setSearchQuery('')}
+                  onClick={resetFilters}
                   className="mt-4 text-blue-600 transition-colors hover:underline dark:text-blue-400"
                 >
-                  Clear search
+                  Reset filters
                 </button>
               </>
             ) : (
@@ -838,7 +1128,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </table>
             </div>
 
-            <div className="grid gap-3 md:hidden">
+            <div className="grid min-w-0 gap-3 md:hidden">
               {paginatedVisibleItems.map((item) => (
                 <MobileCard
                   key={item.id}
@@ -1296,16 +1586,17 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
         onDragOver={handleDragOver}
         onDrop={(event) => onDropOnFolder(event, folder.id)}
         onClick={() => onNavigateFolder(folder.id)}
-        className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800"
+        data-testid={`mobile-card-${folder.id}`}
+        className="w-full min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800"
       >
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <div className="rounded-2xl bg-blue-50 p-3 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400">
                 <FolderIcon className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <p title={folder.name} className="truncate font-semibold text-slate-900 dark:text-white">
+                <p title={folder.name} className="break-all font-semibold text-slate-900 dark:text-white">
                   {folder.name}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -1315,7 +1606,7 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
             <IconActionButton
               icon={<MoveIcon className="h-4 w-4" />}
               label="Move"
@@ -1344,17 +1635,18 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
     <div
       draggable
       onDragStart={(event) => onDragStart(event, doc.id)}
-      className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800"
+      data-testid={`mobile-card-${doc.id}`}
+      className="w-full min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800"
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-start gap-3">
             <div className="rounded-2xl bg-slate-100 p-3 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
               <FileIcon className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">
-                <p title={doc.name} className="min-w-0 flex-1 truncate font-semibold text-slate-900 dark:text-white">
+                <p title={doc.name} className="min-w-0 flex-1 break-all font-semibold text-slate-900 dark:text-white">
                   {doc.name}
                 </p>
                 <div className="relative shrink-0">

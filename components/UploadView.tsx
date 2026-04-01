@@ -1,26 +1,60 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ProcessingOptions, PromptPreset, SettingsTab } from '../types';
-import { DEFAULT_MODEL_ID, GeminiModel, getPreferredDefaultModelId } from '../utils/modelStorage';
+import { DEFAULT_MODEL_ID, GeminiModel, OcrProvider, getPreferredDefaultModelId } from '../utils/modelStorage';
 import { FileIcon, TrashIcon, UploadCloudIcon } from './Icons';
 import ProcessingOptionsSelector from './ProcessingOptionsSelector';
+// @ts-ignore
+import * as pdfjsLib from 'pdfjs-dist';
 
 interface UploadViewProps {
   onFileSelect: (files: FileList, options: ProcessingOptions) => void;
   models: GeminiModel[];
+  activeOcrProvider: OcrProvider;
   prompts: PromptPreset[];
   onOpenSettings: (tab?: SettingsTab) => void;
 }
 
+interface SelectedFileMetrics {
+  pageCount: number | null;
+  status: 'counting' | 'ready' | 'error';
+}
+
+const getSelectedFileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+
+const isPdfFile = (file: File) => (
+  file.type === 'application/pdf'
+  || file.name.toLowerCase().endsWith('.pdf')
+);
+
+const getFilePageCount = async (file: File): Promise<number> => {
+  if (!isPdfFile(file)) {
+    return 1;
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({
+    data: arrayBuffer,
+    disableWorker: true,
+  });
+  const pdf = await loadingTask.promise;
+  return pdf.numPages;
+};
+
+const formatPageCount = (pageCount: number) => `${pageCount} page${pageCount === 1 ? '' : 's'}`;
+
 const UploadView: React.FC<UploadViewProps> = ({
   onFileSelect,
   models,
+  activeOcrProvider,
   prompts,
   onOpenSettings,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedFileMetrics, setSelectedFileMetrics] = useState<Record<string, SelectedFileMetrics>>({});
   const [options, setOptions] = useState<ProcessingOptions>({
     model: DEFAULT_MODEL_ID,
+    ocrProvider: activeOcrProvider,
     processingMode: 'ocr',
     targetLanguage: 'Español',
     customPrompt: '',
@@ -30,21 +64,67 @@ const UploadView: React.FC<UploadViewProps> = ({
 
   useEffect(() => {
     if (models.length === 0) {
+      setOptions((current) => ({ ...current, ocrProvider: activeOcrProvider }));
       return;
     }
 
     setOptions((current) => {
       const modelStillAvailable = models.some((model) => model.id === current.model);
       if (modelStillAvailable) {
-        return current;
+        return { ...current, ocrProvider: activeOcrProvider };
       }
 
       return {
         ...current,
+        ocrProvider: activeOcrProvider,
         model: getPreferredDefaultModelId(models),
       };
     });
-  }, [models]);
+  }, [activeOcrProvider, models]);
+
+  useEffect(() => {
+    if (selectedFiles.length === 0) {
+      setSelectedFileMetrics({});
+      return;
+    }
+
+    let isCancelled = false;
+    const nextMetrics = selectedFiles.reduce<Record<string, SelectedFileMetrics>>((accumulator, file) => {
+      const key = getSelectedFileKey(file);
+      accumulator[key] = isPdfFile(file)
+        ? { pageCount: null, status: 'counting' }
+        : { pageCount: 1, status: 'ready' };
+      return accumulator;
+    }, {});
+
+    setSelectedFileMetrics(nextMetrics);
+
+    void Promise.all(selectedFiles.map(async (file) => {
+      const key = getSelectedFileKey(file);
+
+      if (!isPdfFile(file)) {
+        return [key, nextMetrics[key]] as const;
+      }
+
+      try {
+        const pageCount = await getFilePageCount(file);
+        return [key, { pageCount, status: 'ready' as const }] as const;
+      } catch (error) {
+        console.error(`Failed to count pages for ${file.name}`, error);
+        return [key, { pageCount: null, status: 'error' as const }] as const;
+      }
+    })).then((results) => {
+      if (isCancelled) {
+        return;
+      }
+
+      setSelectedFileMetrics(Object.fromEntries(results));
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedFiles]);
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -82,7 +162,7 @@ const UploadView: React.FC<UploadViewProps> = ({
   };
 
   const handleStartProcessing = () => {
-    if (selectedFiles.length === 0) {
+    if (selectedFiles.length === 0 || models.length === 0) {
       return;
     }
 
@@ -91,6 +171,7 @@ const UploadView: React.FC<UploadViewProps> = ({
 
     onFileSelect(dataTransfer.files, {
       ...options,
+      ocrProvider: activeOcrProvider,
       targetLanguage: options.processingMode === 'translation' ? options.targetLanguage : undefined,
       customPrompt: options.processingMode === 'manual' ? options.customPrompt : undefined,
       removeReferences: options.processingMode !== 'manual' ? options.removeReferences : undefined,
@@ -104,11 +185,21 @@ const UploadView: React.FC<UploadViewProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const selectedPageMetrics = selectedFiles.map((file) => selectedFileMetrics[getSelectedFileKey(file)]);
+  const hasPendingPageCount = selectedPageMetrics.some((metric) => metric?.status === 'counting');
+  const totalSelectedPages = selectedPageMetrics.every((metric) => typeof metric?.pageCount === 'number')
+    ? selectedPageMetrics.reduce((total, metric) => total + (metric?.pageCount ?? 0), 0)
+    : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col transition-colors duration-200">
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-24 pt-5 sm:px-6 sm:pb-8 sm:pt-6">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)] lg:items-stretch">
-          <section className="h-full rounded-[2rem] bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 px-6 py-8 text-white shadow-xl sm:px-8 sm:py-10">
+      <div className="flex flex-1 min-h-0 overflow-y-auto px-4 pb-24 pt-5 sm:px-6 sm:py-6 lg:items-center">
+        <div
+          data-testid="upload-view-panels"
+          className="mx-auto flex min-h-full w-full max-w-6xl items-center"
+        >
+          <div className="flex w-full flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)] lg:items-stretch">
+            <section className="h-full rounded-[2rem] bg-gradient-to-br from-blue-600 via-sky-600 to-cyan-500 px-6 py-8 text-white shadow-xl sm:px-8 sm:py-10">
             <span className="inline-flex rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white/90">
               OCR Workspace
             </span>
@@ -178,7 +269,15 @@ const UploadView: React.FC<UploadViewProps> = ({
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-white">{file.name}</p>
-                        <p className="text-xs text-blue-100">{formatFileSize(file.size)}</p>
+                        <p className="text-xs text-blue-100">
+                          {formatFileSize(file.size)}
+                          {' • '}
+                          {selectedFileMetrics[getSelectedFileKey(file)]?.status === 'counting'
+                            ? 'Counting pages...'
+                            : selectedFileMetrics[getSelectedFileKey(file)]?.status === 'error'
+                              ? 'Page count unavailable'
+                              : formatPageCount(selectedFileMetrics[getSelectedFileKey(file)]?.pageCount ?? 1)}
+                        </p>
                       </div>
                       <button
                         type="button"
@@ -195,25 +294,29 @@ const UploadView: React.FC<UploadViewProps> = ({
             )}
           </section>
 
-          <section className="h-full rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-6">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Processing settings</h2>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                Choose a model, switch mode, and reuse prompts stored in Settings.
-              </p>
-            </div>
+            <section className="h-full rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800 sm:p-6">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Processing settings</h2>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  Choose a model, switch mode, and reuse prompts stored in Settings.
+                </p>
+              </div>
 
-            <div className="mt-6">
-              <ProcessingOptionsSelector
-                options={options}
-                onChange={setOptions}
-                models={models}
-                prompts={prompts}
-                onOpenSettings={onOpenSettings}
-                showBatchSizeOption
-              />
-            </div>
-          </section>
+              <div className="mt-6">
+                <ProcessingOptionsSelector
+                  options={options}
+                  onChange={setOptions}
+                  models={models}
+                  prompts={prompts}
+                  onOpenSettings={onOpenSettings}
+                  showBatchSizeOption
+                  selectedFileCount={selectedFiles.length}
+                  selectedPageCount={totalSelectedPages}
+                  hasPendingPageCount={hasPendingPageCount}
+                />
+              </div>
+            </section>
+          </div>
         </div>
       </div>
 
@@ -221,9 +324,9 @@ const UploadView: React.FC<UploadViewProps> = ({
         <div className="mx-auto w-full max-w-6xl">
           <button
             onClick={handleStartProcessing}
-            disabled={selectedFiles.length === 0}
+            disabled={selectedFiles.length === 0 || models.length === 0}
             className={`flex w-full items-center justify-center gap-2 rounded-full px-5 py-3.5 text-sm font-semibold transition-colors sm:text-base ${
-              selectedFiles.length > 0
+              selectedFiles.length > 0 && models.length > 0
                 ? 'bg-blue-600 text-white hover:bg-blue-700'
                 : 'cursor-not-allowed bg-slate-300 text-slate-500 dark:bg-slate-700 dark:text-slate-400'
             }`}

@@ -113,6 +113,7 @@ describe('Editor header layout', () => {
           onPersistDocument={vi.fn(async (doc) => doc)}
           onRefreshDocument={vi.fn(async () => null)}
           models={[]}
+          activeOcrProvider="gemini"
           prompts={[]}
           onOpenSettings={vi.fn()}
         />
@@ -154,6 +155,7 @@ describe('Editor header layout', () => {
           onPersistDocument={onPersistDocument}
           onRefreshDocument={vi.fn(async () => null)}
           models={[]}
+          activeOcrProvider="gemini"
           prompts={[]}
           onOpenSettings={vi.fn()}
         />

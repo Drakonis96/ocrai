@@ -393,6 +393,7 @@ export const createDocumentProcessingManager = ({
             const mimeType = path.extname(filename).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
 
             const result = await processPage({
+              modelProvider: docData.ocrProvider,
               base64Image,
               mimeType,
               modelName: docData.modelUsed,

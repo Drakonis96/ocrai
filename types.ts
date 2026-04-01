@@ -1,3 +1,5 @@
+import type { OcrProvider } from './utils/modelStorage';
+
 export enum BlockLabel {
   TITLE = 'TITLE',
   MAIN_TEXT = 'MAIN_TEXT',
@@ -20,8 +22,6 @@ export interface TextBlock {
   text: string;
   label: BlockLabel;
   box_2d?: number[]; // [ymin, xmin, ymax, xmax] standard Gemini normalized
-  columnIndex?: number;
-  readingOrder?: number;
 }
 
 export interface PageData {
@@ -53,6 +53,7 @@ export interface DocumentData extends FileSystemItem {
   pages: PageData[];
   status: 'uploading' | 'processing' | 'ready' | 'error';
   modelUsed: string;
+  ocrProvider?: OcrProvider;
   isRead?: boolean;
   labels?: string[];
   processingMode?: 'ocr' | 'translation' | 'manual';
@@ -83,6 +84,7 @@ export enum AppView {
 
 export interface ProcessingOptions {
   model: string;
+  ocrProvider?: OcrProvider;
   processingMode: 'ocr' | 'translation' | 'manual';
   targetLanguage?: string;
   customPrompt?: string;

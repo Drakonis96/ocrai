@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.4.0 - 2026-04-01
+
+### Added
+- Added full-text dashboard search that can be toggled on demand, so users can switch between lightweight filename search and OCR-content search without changing the core list workflow.
+- Added dashboard filters for labels, status, date range, and folder selection, making large document libraries much easier to narrow down.
+- Added local OCR provider support for `LM Studio` and `Ollama`, including provider selection, default-model selection, autodetection of installed local models, and configurable host/port settings.
+- Added page-count summaries during upload so the UI shows how many pages are in the selected document set before users choose `Pages Processed At Once`.
+
+### Changed
+- Expanded the OCR settings surface so `Gemini`, `LM Studio`, and `Ollama` can all be managed from Settings with a shared default-provider workflow.
+- Reworked the dashboard header to place the search bar directly between `Home` and the creation actions, reclaiming vertical space and removing an unnecessary toolbar row.
+- Reworked the upload screen layout so the drag-and-drop panel and processing-settings panel are vertically centered within the available viewport space.
+- Refreshed the README with a more product-oriented presentation, improved setup guidance, local-provider documentation, and embedded screenshots.
+
+### Fixed
+- Fixed mobile document cards so they no longer overflow horizontally on narrow devices when long names or controls are present.
+- Fixed local-provider autodetection so `LM Studio` and `Ollama` use the host and port currently being edited in Settings instead of only the last saved values.
+- Fixed the upload flow to surface document page counts before processing, giving users the context needed to choose sensible parallel page batch sizes.
+
+### Testing
+- Added regression coverage for dashboard full-text search and filters, OCR provider settings and autodetection, local OCR provider service calls, upload page-count summaries, and the updated dashboard toolbar layout.
+- Verified the full automated suite (`61` tests) and production build before release.
+
 ## v1.3.4 - 2026-03-31
 
 ### Changed

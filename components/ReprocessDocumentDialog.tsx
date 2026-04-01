@@ -82,14 +82,24 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
           <select
             value={selectedModelId}
             onChange={(event) => onChangeModel(event.target.value)}
+            disabled={models.length === 0}
             className="w-full rounded-2xl border border-slate-300 bg-white p-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
           >
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name} ({model.description}){model.isCustom ? ' ★' : ''}
-              </option>
-            ))}
+            {models.length === 0 ? (
+              <option value="">No models available</option>
+            ) : (
+              models.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.description}){model.isCustom ? ' ★' : ''}{model.isAutodetected ? ' • Auto' : ''}
+                </option>
+              ))
+            )}
           </select>
+          {models.length === 0 && (
+            <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+              No models are available for the active OCR provider.
+            </p>
+          )}
         </label>
 
         <label className="mt-4 block">
@@ -158,7 +168,7 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
             label={isSubmitting ? 'Reprocessing document' : 'Reprocess document'}
             isActive
             variant="primary"
-            disabled={isSubmitting}
+            disabled={isSubmitting || models.length === 0}
             onClick={onSubmit}
           />
         </div>
