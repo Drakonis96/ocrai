@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.1 - 2026-05-04
+
+### Added
+- Added a minimize/maximize button to the processing documents panel (bottom-right) so it can be collapsed while documents are being processed and expanded again on demand. The panel auto-expands when a new upload starts.
+
 ## v1.5.0 - 2026-05-04
 
 ### Changed
