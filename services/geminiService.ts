@@ -1,6 +1,120 @@
 import { DocumentData, TextBlock, ProcessingOptions } from "../types";
 import { DEFAULT_MODEL_ID, OcrProvider } from "../utils/modelStorage";
 
+type ReprocessResponseFormat = 'html' | 'json' | 'text';
+
+export interface ReprocessPageRequestError extends Error {
+  responseBody?: string;
+  responseStatus?: number;
+  responseFormat?: ReprocessResponseFormat;
+}
+
+const MAX_REPROCESS_ERROR_BODY_LENGTH = 12_000;
+
+const looksLikeHtml = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith('<!doctype html') || normalized.startsWith('<html') || normalized.startsWith('<body');
+};
+
+const parseJsonPayload = (value: string) => {
+  if (!value.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const truncateResponseBody = (value: string) => {
+  const normalized = value.trim();
+  if (normalized.length <= MAX_REPROCESS_ERROR_BODY_LENGTH) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, MAX_REPROCESS_ERROR_BODY_LENGTH)}\n\n...[truncated]`;
+};
+
+const createReprocessPageError = (
+  message: string,
+  details: {
+    rawBody?: string;
+    status?: number;
+    format?: ReprocessResponseFormat;
+  } = {}
+): ReprocessPageRequestError => {
+  const error = new Error(message) as ReprocessPageRequestError;
+
+  if (typeof details.rawBody === 'string' && details.rawBody.trim()) {
+    error.responseBody = truncateResponseBody(details.rawBody);
+  }
+
+  if (Number.isInteger(details.status)) {
+    error.responseStatus = details.status;
+  }
+
+  if (details.format) {
+    error.responseFormat = details.format;
+  }
+
+  return error;
+};
+
+const parseReprocessPageResponse = async (response: Response): Promise<{ blocks?: unknown[]; blankPage?: boolean }> => {
+  const rawBody = await response.text();
+  const payload = parseJsonPayload(rawBody);
+
+  if (!response.ok) {
+    if (typeof payload?.error === 'string' && payload.error.trim()) {
+      throw createReprocessPageError(payload.error, {
+        rawBody,
+        status: response.status,
+        format: 'json',
+      });
+    }
+
+    if (looksLikeHtml(rawBody)) {
+      throw createReprocessPageError(
+        `Server returned HTML instead of JSON while reprocessing page (status ${response.status}). Check that the API route is reachable and your session is still valid.`,
+        {
+          rawBody,
+          status: response.status,
+          format: 'html',
+        }
+      );
+    }
+
+    throw createReprocessPageError(rawBody.trim() || 'Failed to reprocess page on server', {
+      rawBody,
+      status: response.status,
+      format: payload ? 'json' : 'text',
+    });
+  }
+
+  if (payload) {
+    return payload;
+  }
+
+  if (looksLikeHtml(rawBody)) {
+    throw createReprocessPageError(
+      `Server returned HTML instead of JSON while reprocessing page (status ${response.status}). Check that the API route is reachable and your session is still valid.`,
+      {
+        rawBody,
+        status: response.status,
+        format: 'html',
+      }
+    );
+  }
+
+  throw createReprocessPageError('Server returned a non-JSON response while reprocessing page', {
+    rawBody,
+    status: response.status,
+    format: 'text',
+  });
+};
+
 const processPageWithGemini = async (
   base64Image: string,
   mimeType: string,
@@ -137,13 +251,7 @@ const reprocessPage = async (
         splitColumns
       }),
     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Failed to reprocess page on server");
-    }
-
-    const data = await response.json();
+    const data = await parseReprocessPageResponse(response);
     
     // Add unique IDs to blocks for React keys
     const blocksWithIds = (data.blocks || []).map((b: any) => ({
@@ -157,7 +265,11 @@ const reprocessPage = async (
 
   } catch (error: any) {
     console.error("Gemini Service Error:", error);
-    throw new Error(error.message || "Failed to reprocess page");
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error(error?.message || "Failed to reprocess page");
   }
 };
 

@@ -60,11 +60,13 @@ describe('Dashboard OCR error indicators', () => {
         status: 'processing',
         processedPages: 4,
         failedPages: 1,
+        retryingPages: 2,
       }),
     ]);
 
     expect(html).toContain('Processing');
     expect(html).toContain('1 failed page');
+    expect(html).toContain('2 pages waiting to retry');
   });
 
   it('shows active processing pages in the visual progress count', () => {

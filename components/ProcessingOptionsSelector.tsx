@@ -10,6 +10,7 @@ interface ProcessingOptionsSelectorProps {
   prompts: PromptPreset[];
   onOpenSettings?: (tab?: SettingsTab) => void;
   showBatchSizeOption?: boolean;
+  showRetryOption?: boolean;
   selectedFileCount?: number;
   selectedPageCount?: number | null;
   hasPendingPageCount?: boolean;
@@ -34,6 +35,7 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
   prompts,
   onOpenSettings,
   showBatchSizeOption = false,
+  showRetryOption = false,
   selectedFileCount = 0,
   selectedPageCount = null,
   hasPendingPageCount = false,
@@ -71,6 +73,9 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
   const normalizedBatchSize = Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0
     ? options.pagesPerBatch
     : 1;
+  const normalizedMaxRetries = Number.isInteger(options.maxRetries) && (options.maxRetries ?? -1) >= 0
+    ? options.maxRetries
+    : 0;
 
   return (
     <div className="space-y-4">
@@ -166,6 +171,25 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
           </div>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             New uploads will process this many pages in parallel.
+          </p>
+        </div>
+      )}
+
+      {showRetryOption && (
+        <div>
+          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">Retries Per Failed Page</label>
+          <input
+            data-testid="processing-retries-input"
+            type="number"
+            min={0}
+            step={1}
+            value={normalizedMaxRetries}
+            onChange={(event) => updateOption('maxRetries', Math.max(0, Math.trunc(Number(event.target.value) || 0)))}
+            className="w-full rounded-2xl border border-slate-300 bg-white p-3 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+            placeholder="Retries"
+          />
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            Only failed pages will retry during the initial processing pass. Use 0 to disable retries.
           </p>
         </div>
       )}

@@ -104,6 +104,7 @@ const collectDescendantItemIds = (sourceItems: FileSystemItem[], parentId: strin
 );
 
 const getUploadFileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+const PROCESSING_POLL_INTERVAL_MS = 1000;
 
 const isDocumentInFlight = (doc: DocumentData) => doc.status === 'processing' || doc.status === 'uploading';
 
@@ -398,7 +399,7 @@ const App: React.FC = () => {
 
     const timer = window.setInterval(() => {
       void loadItems({ preserveUnchanged: true });
-    }, 3000);
+    }, PROCESSING_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
   }, [hasProcessingItems, loadItems]);
@@ -724,6 +725,9 @@ const App: React.FC = () => {
         try {
           const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
           const optimisticPageCount = Math.max(filePageCounts.get(getUploadFileKey(file)) ?? 0, 0);
+          const normalizedMaxRetries = Number.isInteger(options.maxRetries) && (options.maxRetries ?? -1) >= 0
+            ? options.maxRetries
+            : 0;
           const imageData = isPdf
             ? []
             : [{ data: await fileToBase64(file), mimeType: file.type }];
@@ -747,6 +751,7 @@ const App: React.FC = () => {
             customPrompt: options.customPrompt,
             removeReferences: options.removeReferences,
             pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
+            maxRetries: normalizedMaxRetries,
             splitColumns: options.splitColumns === true,
             totalPages: isPdf ? optimisticPageCount : imageData.length,
             processedPages: 0,

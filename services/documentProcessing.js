@@ -1,12 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 
-const DEFAULT_MAX_RETRIES = 4;
-const DEFAULT_RETRY_BASE_DELAY_MS = 30_000;
-const DEFAULT_RETRY_MAX_DELAY_MS = 10 * 60 * 1000;
+const DEFAULT_RETRY_BASE_DELAY_MS = 5_000;
+const DEFAULT_RETRY_MAX_DELAY_MS = 60_000;
+const DEFAULT_MAX_CONCURRENT_PAGE_PROCESSING = 2;
 const DEFAULT_READ_METADATA_RETRIES = 5;
 const DEFAULT_READ_METADATA_RETRY_DELAY_MS = 250;
 const DEFAULT_INITIAL_READ_DELAY_MS = 0;
+const DEFAULT_MAX_RETRIES_CAP = Number.MAX_SAFE_INTEGER;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
@@ -214,6 +215,7 @@ export const normalizeDocumentRuntimeState = (docData, { resetInFlightProcessing
     ? normalizedDocument.pages.map((page, index) => normalizePageState(page, index, { resetInFlightProcessing }))
     : [];
   normalizedDocument.pagesPerBatch = getPagesPerBatch(normalizedDocument.pagesPerBatch);
+  normalizedDocument.maxRetries = normalizeNonNegativeInteger(normalizedDocument.maxRetries, 0);
   normalizedDocument.totalPages = Math.max(
     normalizeNonNegativeInteger(normalizedDocument.totalPages, normalizedDocument.pages.length),
     normalizedDocument.pages.length
@@ -309,15 +311,41 @@ export const createDocumentProcessingManager = ({
   config = {},
 }) => {
   const runtimeConfig = {
-    maxRetries: normalizeNonNegativeInteger(config.maxRetries ?? process.env.OCR_MAX_RETRIES, DEFAULT_MAX_RETRIES),
+    maxRetriesCap: normalizeNonNegativeInteger(config.maxRetries ?? process.env.OCR_MAX_RETRIES, DEFAULT_MAX_RETRIES_CAP),
     retryBaseDelayMs: normalizePositiveInteger(config.retryBaseDelayMs ?? process.env.OCR_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_BASE_DELAY_MS),
     retryMaxDelayMs: normalizePositiveInteger(config.retryMaxDelayMs ?? process.env.OCR_RETRY_MAX_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS),
+    maxConcurrentPageProcessing: normalizePositiveInteger(
+      config.maxConcurrentPageProcessing ?? process.env.OCR_MAX_CONCURRENT_PAGE_PROCESSING,
+      DEFAULT_MAX_CONCURRENT_PAGE_PROCESSING
+    ),
     readMetadataRetries: normalizePositiveInteger(config.readMetadataRetries, DEFAULT_READ_METADATA_RETRIES),
     readMetadataRetryDelayMs: normalizePositiveInteger(config.readMetadataRetryDelayMs, DEFAULT_READ_METADATA_RETRY_DELAY_MS),
     initialReadDelayMs: normalizeNonNegativeInteger(config.initialReadDelayMs, DEFAULT_INITIAL_READ_DELAY_MS),
   };
 
   const activeProcessing = new Set();
+  let activePageProcessingCount = 0;
+  const pageProcessingWaiters = [];
+
+  const acquirePageProcessingSlot = async () => {
+    if (activePageProcessingCount < runtimeConfig.maxConcurrentPageProcessing) {
+      activePageProcessingCount += 1;
+      return;
+    }
+
+    await new Promise((resolve) => {
+      pageProcessingWaiters.push(resolve);
+    });
+    activePageProcessingCount += 1;
+  };
+
+  const releasePageProcessingSlot = () => {
+    activePageProcessingCount = Math.max(0, activePageProcessingCount - 1);
+    const nextWaiter = pageProcessingWaiters.shift();
+    if (nextWaiter) {
+      nextWaiter();
+    }
+  };
 
   const processDocumentBackground = async (docId) => {
     if (activeProcessing.has(docId)) {
@@ -439,6 +467,7 @@ export const createDocumentProcessingManager = ({
           }
 
           logger.log(`Processing page ${pageNumber}/${docData.pages.length} for ${docId}`);
+          await acquirePageProcessingSlot();
 
           try {
             const currentPage = docData.pages[pageIndex];
@@ -501,8 +530,12 @@ export const createDocumentProcessingManager = ({
             latestPage.lastError = formatProcessingError(error);
             latestPage.errorDismissed = false;
             latestPage.retryCount = normalizeNonNegativeInteger(latestPage.retryCount, 0) + 1;
+            const effectiveMaxRetries = Math.min(
+              normalizeNonNegativeInteger(docData.maxRetries, 0),
+              runtimeConfig.maxRetriesCap
+            );
 
-            if (isRetryableProcessingError(error) && latestPage.retryCount <= runtimeConfig.maxRetries) {
+            if (isRetryableProcessingError(error) && latestPage.retryCount <= effectiveMaxRetries) {
               latestPage.status = 'pending';
               latestPage.nextRetryAt = Date.now() + getRetryDelayMs(latestPage.retryCount, runtimeConfig, error);
             } else {
@@ -511,6 +544,8 @@ export const createDocumentProcessingManager = ({
             }
 
             await persistMetadata();
+          } finally {
+            releasePageProcessingSlot();
           }
         }));
       }

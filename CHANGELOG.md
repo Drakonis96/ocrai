@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.5 - 2026-05-04
+
+### Added
+- Added an initial-processing retry selector to uploads so each document can choose its own retry count and new uploads default to `0` retries.
+- Added a reprocess error dialog that preserves the raw server response, including HTML fallback pages returned instead of JSON.
+
+### Changed
+- Reduced dashboard polling latency for in-flight documents and surfaced a retry-queue label while pages are waiting for their next OCR attempt.
+- Queued PDF rasterization per document and added a global OCR page-processing slot limit so multi-document runs stop oversubscribing CPU and provider capacity.
+
+### Fixed
+- Fixed initial document processing so failed pages are only retried when the upload explicitly requested retries.
+- Fixed page reprocessing so non-JSON responses are reported clearly instead of crashing on `Unexpected token '<'`.
+
+### Testing
+- Added regression coverage for upload retry selection, document-level retry defaults, retry-queue rendering, and raw reprocess error details.
+- Verified focused processing, dashboard, editor, upload, and service regressions plus the production build.
+
 ## v1.4.4 - 2026-05-04
 
 ### Added

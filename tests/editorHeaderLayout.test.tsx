@@ -282,7 +282,15 @@ describe('Editor header layout', () => {
       '(max-width: 1279px)': false,
     });
 
-    reprocessPageMock.mockRejectedValue(new Error('502: OCR response did not contain any text blocks'));
+    const error = new Error('502: OCR response did not contain any text blocks') as Error & {
+      responseBody?: string;
+      responseStatus?: number;
+      responseFormat?: string;
+    };
+    error.responseBody = '<!DOCTYPE html><html><body>Bad Gateway</body></html>';
+    error.responseStatus = 502;
+    error.responseFormat = 'html';
+    reprocessPageMock.mockRejectedValue(error);
 
     await act(async () => {
       root.render(
@@ -322,8 +330,10 @@ describe('Editor header layout', () => {
     });
 
     expect(reprocessPageMock).toHaveBeenCalledTimes(3);
-    expect(alertMock).toHaveBeenCalledWith(
-      'Failed to reprocess page 1.\nPage 1: 502: OCR response did not contain any text blocks'
-    );
+    expect(alertMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Failed to reprocess page 1');
+    expect(container.textContent).toContain('Page 1: 502: OCR response did not contain any text blocks');
+    expect(container.querySelector('[data-testid="reprocess-error-details"]')?.textContent).toContain('Bad Gateway');
+    expect(container.querySelector('[data-testid="reprocess-error-details"]')?.textContent).toContain('Response format: html');
   });
 });

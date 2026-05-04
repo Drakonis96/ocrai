@@ -19,7 +19,7 @@ import {
   LoaderIcon,
   RefreshCwIcon,
 } from '../Icons';
-import { reprocessPage } from '../../services/geminiService';
+import { reprocessPage, type ReprocessPageRequestError } from '../../services/geminiService';
 import ProcessingOptionsSelector from '../ProcessingOptionsSelector';
 import IconActionButton from '../IconActionButton';
 import DocumentNameDialog from '../DocumentNameDialog';
@@ -45,6 +45,20 @@ const MIN_EDITOR_WIDTH = 30;
 const MAX_EDITOR_WIDTH = 70;
 const DEFAULT_REPROCESS_RETRIES = 0;
 
+interface ReprocessFailureDetail {
+  pageNumber: number;
+  message: string;
+  responseBody?: string;
+  responseStatus?: number;
+  responseFormat?: string;
+}
+
+interface ReprocessErrorDialogState {
+  title: string;
+  summary: string;
+  details: string;
+}
+
 const createReprocessOptions = (
   sourceDoc: DocumentData,
   activeOcrProvider: OcrProvider,
@@ -64,6 +78,50 @@ const createReprocessOptions = (
     removeReferences: sourceDoc.removeReferences !== false,
     splitColumns: sourceDoc.splitColumns === true,
   };
+};
+
+const toReprocessFailureDetail = (pageNumber: number, error: ReprocessPageRequestError | Error): ReprocessFailureDetail => ({
+  pageNumber,
+  message: error.message || 'Unknown error',
+  responseBody: typeof (error as ReprocessPageRequestError).responseBody === 'string'
+    ? (error as ReprocessPageRequestError).responseBody
+    : undefined,
+  responseStatus: Number.isInteger((error as ReprocessPageRequestError).responseStatus)
+    ? (error as ReprocessPageRequestError).responseStatus
+    : undefined,
+  responseFormat: typeof (error as ReprocessPageRequestError).responseFormat === 'string'
+    ? (error as ReprocessPageRequestError).responseFormat
+    : undefined,
+});
+
+const createReprocessErrorDialogState = (failures: ReprocessFailureDetail[]): ReprocessErrorDialogState => {
+  const title = failures.length === 1
+    ? `Failed to reprocess page ${failures[0].pageNumber}`
+    : `${failures.length} pages failed to reprocess`;
+  const summary = failures.map((failure) => `Page ${failure.pageNumber}: ${failure.message}`).join('\n');
+  const details = failures.map((failure) => {
+    const lines = [
+      `Page ${failure.pageNumber}`,
+      `Message: ${failure.message}`,
+    ];
+
+    if (failure.responseStatus !== undefined) {
+      lines.push(`HTTP status: ${failure.responseStatus}`);
+    }
+
+    if (failure.responseFormat) {
+      lines.push(`Response format: ${failure.responseFormat}`);
+    }
+
+    if (failure.responseBody) {
+      lines.push('Raw response:');
+      lines.push(failure.responseBody);
+    }
+
+    return lines.join('\n');
+  }).join('\n\n--------------------\n\n');
+
+  return { title, summary, details };
 };
 const EditorView: React.FC<EditorViewProps> = ({
   doc,
@@ -90,6 +148,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [isUpdatingErrorDismissal, setIsUpdatingErrorDismissal] = useState(false);
   const [showReprocessModal, setShowReprocessModal] = useState(false);
+  const [reprocessErrorDialog, setReprocessErrorDialog] = useState<ReprocessErrorDialogState | null>(null);
   const [reprocessScope, setReprocessScope] = useState<ReprocessScope>('current');
   const [reprocessRetries, setReprocessRetries] = useState(DEFAULT_REPROCESS_RETRIES);
   const [reprocessProgress, setReprocessProgress] = useState<{
@@ -473,6 +532,7 @@ const EditorView: React.FC<EditorViewProps> = ({
   };
 
   const handleOpenCurrentPageReprocess = () => {
+    setReprocessErrorDialog(null);
     setReprocessOptions(createReprocessOptions(workingDoc, activeOcrProvider, models));
     setReprocessRetries(DEFAULT_REPROCESS_RETRIES);
     setReprocessScope('current');
@@ -484,6 +544,7 @@ const EditorView: React.FC<EditorViewProps> = ({
       return;
     }
 
+    setReprocessErrorDialog(null);
     setReprocessOptions(createReprocessOptions(workingDoc, activeOcrProvider, models));
     setReprocessRetries(DEFAULT_REPROCESS_RETRIES);
     setReprocessScope('issues');
@@ -502,9 +563,10 @@ const EditorView: React.FC<EditorViewProps> = ({
     let successfulPages = 0;
     let failedPages = 0;
     let firstFailedPageIndex: number | null = null;
-    const failureMessages: string[] = [];
+    const failureDetails: ReprocessFailureDetail[] = [];
     const totalAttempts = reprocessRetries + 1;
 
+    setReprocessErrorDialog(null);
     setIsReprocessing(true);
     setShowReprocessModal(false);
 
@@ -557,7 +619,7 @@ const EditorView: React.FC<EditorViewProps> = ({
             if (firstFailedPageIndex === null) {
               firstFailedPageIndex = pageIndex;
             }
-            failureMessages.push(`Page ${pageIndex + 1}: ${error?.message || 'Unknown error'}`);
+            failureDetails.push(toReprocessFailureDetail(pageIndex + 1, error));
           }
         }
 
@@ -580,10 +642,8 @@ const EditorView: React.FC<EditorViewProps> = ({
         setIsSaved(false);
       }
 
-      if (!multiplePages && failedPages > 0) {
-        alert(`Failed to reprocess page ${pageIndexes[0] + 1}.\n${failureMessages[0] || 'It still needs review.'}`);
-      } else if (multiplePages && failedPages > 0) {
-        alert(`${failedPages} pages could not be reprocessed and still need review.\n\n${failureMessages.join('\n')}`);
+      if (failedPages > 0) {
+        setReprocessErrorDialog(createReprocessErrorDialogState(failureDetails));
       }
     } catch (error: any) {
       const refreshedDoc = await onRefreshDocument(docId);
@@ -591,9 +651,10 @@ const EditorView: React.FC<EditorViewProps> = ({
         applyRefreshedDocument(refreshedDoc, nextOverrides);
       }
 
-      const label = multiplePages ? 'pages' : 'page';
       console.error('Reprocess failed', error);
-      alert(`Failed to reprocess ${label}: ${error.message || 'Unknown error'}`);
+      setReprocessErrorDialog(createReprocessErrorDialogState([
+        toReprocessFailureDetail(multiplePages ? pageIndexes[0] + 1 : activePage + 1, error),
+      ]));
     } finally {
       setReprocessProgress(null);
       setIsReprocessing(false);
@@ -1113,6 +1174,48 @@ const EditorView: React.FC<EditorViewProps> = ({
         onClose={handleCloseRenameDialog}
         onSubmit={handleRenameDocument}
       />
+
+      {reprocessErrorDialog && (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-700">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 dark:text-white">{reprocessErrorDialog.title}</h3>
+                <p className="mt-1 whitespace-pre-line text-sm text-slate-500 dark:text-slate-400">
+                  {reprocessErrorDialog.summary}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReprocessErrorDialog(null)}
+                className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-white"
+              >
+                <CloseIcon className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-4 sm:p-6">
+              <p className="mb-3 text-sm text-slate-600 dark:text-slate-300">
+                This is the raw response captured by the client. If it contains HTML, the page was likely generated by the app server, a reverse proxy, or the hosting platform rather than by the OCR model itself.
+              </p>
+              <pre
+                data-testid="reprocess-error-details"
+                className="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              >
+                {reprocessErrorDialog.details}
+              </pre>
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/50">
+              <IconActionButton
+                icon={<CloseIcon className="h-4 w-4" />}
+                label="Close"
+                onClick={() => setReprocessErrorDialog(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div ref={contentRef} className={`relative flex-1 overflow-hidden ${isMobileLayout ? '' : 'flex'}`}>
         {isMobileLayout ? (

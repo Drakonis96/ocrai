@@ -20,7 +20,7 @@ const createBlocks = (pageNumber) => [
   },
 ];
 
-const createMetadata = ({ docId, pages }) => ({
+const createMetadata = ({ docId, pages, ...overrides }) => ({
   id: docId,
   name: 'sample.pdf',
   type: 'file',
@@ -32,10 +32,12 @@ const createMetadata = ({ docId, pages }) => ({
   processingMode: 'ocr',
   removeReferences: true,
   pagesPerBatch: 1,
+  maxRetries: 0,
   totalPages: pages.length,
   processedPages: 0,
   failedPages: 0,
   pages,
+  ...overrides,
 });
 
 const createPage = (docId, pageNumber, overrides = {}) => ({
@@ -137,6 +139,7 @@ describe('document processing manager', () => {
     const metadata = createMetadata({
       docId,
       pages: [createPage(docId, 1)],
+      maxRetries: 2,
     });
     const { dataDir, docDir } = await createFixture(metadata);
 
@@ -163,6 +166,37 @@ describe('document processing manager', () => {
     expect(stored.pages[0].retryCount).toBe(0);
     expect(stored.pages[0].lastError).toBe('');
     await expect(fs.readFile(path.join(docDir, 'page_1.md'), 'utf-8')).resolves.toContain('Page 1 content');
+  });
+
+  it('does not retry failed pages unless the document retry count is set', async () => {
+    const docId = 'doc-no-default-retries';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    let attempts = 0;
+    const manager = createManager(
+      dataDir,
+      async () => {
+        attempts += 1;
+        const error = new Error('429 rate limit reached');
+        error.status = 429;
+        throw error;
+      },
+      { maxRetries: 5 }
+    );
+
+    await manager.processDocumentBackground(docId);
+
+    const stored = await readMetadata(docDir);
+    expect(attempts).toBe(1);
+    expect(stored.status).toBe('error');
+    expect(stored.failedPages).toBe(1);
+    expect(stored.pages[0].status).toBe('error');
+    expect(stored.pages[0].retryCount).toBe(1);
+    expect(stored.pages[0].nextRetryAt).toBeNull();
   });
 
   it('does not count terminal page errors as processed', async () => {
@@ -225,6 +259,7 @@ describe('document processing manager', () => {
     const docId = 'doc-resume';
     const metadata = createMetadata({
       docId,
+      maxRetries: 1,
       pages: [
         createPage(docId, 1, {
           status: 'processing',
@@ -446,7 +481,7 @@ describe('document processing manager', () => {
         inFlight -= 1;
         return createBlocks(pageNumber);
       },
-      { maxRetries: 0 }
+      { maxRetries: 0, maxConcurrentPageProcessing: pageCount }
     );
 
     await manager.processDocumentBackground(docId);
@@ -457,6 +492,45 @@ describe('document processing manager', () => {
     expect(stored.status).toBe('ready');
     expect(stored.processedPages).toBe(pageCount);
     expect(stored.failedPages).toBe(0);
+  });
+
+  it('limits OCR concurrency globally across multiple documents', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ocrai-doc-processing-global-'));
+    createdDirs.push(dataDir);
+
+    const docIds = ['doc-global-a', 'doc-global-b'];
+
+    await Promise.all(docIds.map(async (docId) => {
+      const metadata = createMetadata({
+        docId,
+        pages: [createPage(docId, 1), createPage(docId, 2)],
+      });
+      const docDir = path.join(dataDir, docId);
+      await fs.mkdir(docDir, { recursive: true });
+      await Promise.all(metadata.pages.map((page) =>
+        fs.writeFile(path.join(docDir, path.basename(page.imageUrl)), 'image-bytes')
+      ));
+      await fs.writeFile(path.join(docDir, 'metadata.json'), JSON.stringify(metadata, null, 2));
+    }));
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    const manager = createManager(
+      dataDir,
+      async ({ pageNumber }) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await sleep(pageNumber % 2 === 0 ? 5 : 20);
+        inFlight -= 1;
+        return createBlocks(pageNumber);
+      },
+      { maxRetries: 0, maxConcurrentPageProcessing: 1 }
+    );
+
+    await Promise.all(docIds.map((docId) => manager.processDocumentBackground(docId)));
+
+    expect(maxInFlight).toBe(1);
   });
 
   it('persists blank-page classifications returned by the processor', async () => {

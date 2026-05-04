@@ -70,6 +70,7 @@ const UploadView: React.FC<UploadViewProps> = ({
     customPrompt: '',
     removeReferences: true,
     pagesPerBatch: 1,
+    maxRetries: 0,
   });
 
   useEffect(() => {
@@ -320,6 +321,7 @@ const UploadView: React.FC<UploadViewProps> = ({
                   prompts={prompts}
                   onOpenSettings={onOpenSettings}
                   showBatchSizeOption
+                  showRetryOption
                   selectedFileCount={selectedFiles.length}
                   selectedPageCount={totalSelectedPages}
                   hasPendingPageCount={hasPendingPageCount}

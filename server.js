@@ -68,6 +68,7 @@ const ALLOWED_IMAGE_MIME_TYPES = new Map([
 ]);
 const DEFAULT_METADATA_READ_RETRIES = 5;
 const DEFAULT_METADATA_READ_RETRY_DELAY_MS = 25;
+const DEFAULT_PDF_DOCUMENT_RASTERIZATION_CONCURRENCY = 1;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
@@ -175,6 +176,11 @@ const normalizeNonNegativeInteger = (value, fallbackValue = 0) => {
   const normalizedValue = Math.trunc(parsedValue);
   return normalizedValue >= 0 ? normalizedValue : fallbackValue;
 };
+
+const MAX_CONCURRENT_PDF_RASTERIZATIONS = normalizePositiveInteger(
+  process.env.PDF_DOCUMENT_RASTERIZATION_CONCURRENCY,
+  DEFAULT_PDF_DOCUMENT_RASTERIZATION_CONCURRENCY
+);
 
 const findPageIndexByNumber = (pages, pageNumber, fallbackIndex) => {
   const targetPageNumber = normalizePositiveInteger(pageNumber, fallbackIndex + 1);
@@ -1264,9 +1270,45 @@ const { processDocumentBackground, resumePendingDocuments } = createDocumentProc
 });
 
 const activePdfRasterizations = new Set();
+const queuedPdfRasterizationIds = new Set();
+const queuedPdfRasterizations = [];
+
+const enqueuePdfRasterization = (docId, options = {}) => {
+  const safeDocId = assertDocumentId(docId);
+  const normalizedOptions = {
+    startProcessing: options.startProcessing === true,
+  };
+
+  if (activePdfRasterizations.has(safeDocId)) {
+    return;
+  }
+
+  const existingQueuedJob = queuedPdfRasterizations.find((job) => job.docId === safeDocId);
+  if (existingQueuedJob) {
+    existingQueuedJob.options.startProcessing = existingQueuedJob.options.startProcessing || normalizedOptions.startProcessing;
+    return;
+  }
+
+  queuedPdfRasterizationIds.add(safeDocId);
+  queuedPdfRasterizations.push({ docId: safeDocId, options: normalizedOptions });
+};
+
+const drainPdfRasterizationQueue = () => {
+  while (activePdfRasterizations.size < MAX_CONCURRENT_PDF_RASTERIZATIONS && queuedPdfRasterizations.length > 0) {
+    const nextJob = queuedPdfRasterizations.shift();
+    if (!nextJob) {
+      return;
+    }
+
+    queuedPdfRasterizationIds.delete(nextJob.docId);
+    rasterizePdfDocumentInBackground(nextJob.docId, nextJob.options).catch((error) => {
+      console.error('Background PDF rasterization trigger failed', error);
+    });
+  }
+};
 
 const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false } = {}) => {
-  if (activePdfRasterizations.has(docId)) {
+  if (activePdfRasterizations.has(docId) || queuedPdfRasterizationIds.has(docId)) {
     return;
   }
 
@@ -1370,6 +1412,7 @@ const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false
     }
   } finally {
     activePdfRasterizations.delete(docId);
+    drainPdfRasterizationQueue();
   }
 };
 
@@ -1788,6 +1831,10 @@ app.post('/api/documents', async (req, res) => {
       await fs.promises.mkdir(docDir, { recursive: true });
     }
 
+    if (item.type === 'file') {
+      item.maxRetries = normalizeNonNegativeInteger(item.maxRetries, 0);
+    }
+
     const uploadedSourceFile = item.type === 'file' ? normalizeUploadedSourceFile(item.sourceFile) : null;
     const isUploadedPdf = uploadedSourceFile
       && (
@@ -1886,9 +1933,8 @@ app.post('/api/documents', async (req, res) => {
 
     // Trigger background processing if requested
     if (isUploadedPdf) {
-      rasterizePdfDocumentInBackground(item.id, { startProcessing: item.startProcessing === true }).catch((error) => {
-        console.error('Background PDF rasterization trigger failed', error);
-      });
+      enqueuePdfRasterization(item.id, { startProcessing: item.startProcessing === true });
+      drainPdfRasterizationQueue();
     } else if (item.startProcessing) {
         processDocumentBackground(item.id).catch(err => console.error("Background processing trigger failed", err));
     }

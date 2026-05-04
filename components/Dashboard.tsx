@@ -67,6 +67,9 @@ const STATUS_ORDER: Record<DocumentData['status'], number> = {
 };
 
 const canOpenDocument = (doc: DocumentData) => doc.status === 'ready' || doc.status === 'error';
+
+const getRetryingPagesLabel = (retryingPages: number) =>
+  retryingPages === 1 ? '1 page waiting to retry' : `${retryingPages} pages waiting to retry`;
 const canReprocessDocument = (doc: DocumentData) => doc.status === 'ready' || doc.status === 'error';
 
 const getFailedPagesLabel = (failedPages: number) =>
@@ -1941,6 +1944,7 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
           processed={displayedProgress}
           total={totalPages}
           failedPages={doc.failedPages}
+          retryingPages={Math.max(doc.retryingPages ?? 0, 0)}
         />
       </td>
       <td className="px-6 py-4">
@@ -2133,6 +2137,7 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
               processed={displayedProgress}
               total={totalPages}
               failedPages={doc.failedPages}
+              retryingPages={Math.max(doc.retryingPages ?? 0, 0)}
             />
           </div>
 
@@ -2193,11 +2198,13 @@ const StatusWithProgress = memo(({
   processed,
   total,
   failedPages,
+  retryingPages,
 }: {
   status: DocumentData['status'];
   processed: number;
   total: number;
   failedPages: number;
+  retryingPages: number;
 }) => {
   const failedBadge = failedPages > 0 ? (
     <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-300">
@@ -2245,6 +2252,9 @@ const StatusWithProgress = memo(({
           style={{ width: `${percentage}%` }}
         />
       </div>
+      {status === 'processing' && retryingPages > 0 && (
+        <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">{getRetryingPagesLabel(retryingPages)}</div>
+      )}
       {failedBadge && <div className="mt-2">{failedBadge}</div>}
     </div>
   );

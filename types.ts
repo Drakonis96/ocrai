@@ -64,6 +64,7 @@ export interface DocumentData extends FileSystemItem {
   customPrompt?: string;
   removeReferences?: boolean;
   pagesPerBatch?: number;
+  maxRetries?: number;
   splitColumns?: boolean;
   // Progress tracking
   totalPages: number;
@@ -93,6 +94,7 @@ export interface ProcessingOptions {
   customPrompt?: string;
   removeReferences?: boolean;
   pagesPerBatch?: number;
+  maxRetries?: number;
   splitColumns?: boolean;
 }
 

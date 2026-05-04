@@ -4,7 +4,20 @@ import { reprocessPage } from '../services/geminiService';
 const createJsonResponse = (payload: unknown, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,
+  text: vi.fn().mockResolvedValue(JSON.stringify(payload)),
+  headers: {
+    get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'application/json' : null)),
+  },
   json: vi.fn().mockResolvedValue(payload),
+}) as unknown as Response;
+
+const createTextResponse = (body: string, status = 200) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  text: vi.fn().mockResolvedValue(body),
+  headers: {
+    get: vi.fn((name: string) => (name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null)),
+  },
 }) as unknown as Response;
 
 describe('geminiService reprocessPage', () => {
@@ -48,6 +61,17 @@ describe('geminiService reprocessPage', () => {
       customPrompt: 'Extract only tables',
       removeReferences: false,
       splitColumns: true,
+    });
+  });
+
+  it('surfaces a useful error when the server returns HTML instead of JSON', async () => {
+    globalThis.fetch = vi.fn(async () => createTextResponse('<!DOCTYPE html><html><body>Not Found</body></html>', 404));
+
+    await expect(reprocessPage('doc-1', 2)).rejects.toMatchObject({
+      message: 'Server returned HTML instead of JSON while reprocessing page (status 404). Check that the API route is reachable and your session is still valid.',
+      responseStatus: 404,
+      responseFormat: 'html',
+      responseBody: '<!DOCTYPE html><html><body>Not Found</body></html>',
     });
   });
 });
