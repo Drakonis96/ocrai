@@ -11,6 +11,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   CloseIcon,
+  StopCircleIcon,
   HomeIcon,
   LoaderIcon,
   LogoutIcon,
@@ -49,7 +50,7 @@ import {
   getOcrSettings,
   updateOcrSettings,
 } from './services/ocrSettingsService';
-import { reprocessDocument } from './services/geminiService';
+import { cancelDocument, reprocessDocument } from './services/geminiService';
 import { downloadBlob } from './utils/download';
 // @ts-ignore
 import JSZip from 'jszip';
@@ -242,6 +243,9 @@ const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSessionDocs, setUploadSessionDocs] = useState<DocumentData[]>([]);
   const [isOverlayMinimized, setIsOverlayMinimized] = useState(false);
+  const [isStopConfirmOpen, setIsStopConfirmOpen] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const uploadAbortedRef = useRef(false);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -719,12 +723,16 @@ const App: React.FC = () => {
     setIsUploading(true);
     setIsOverlayMinimized(false);
     setUploadSessionDocs([]);
+    uploadAbortedRef.current = false;
 
     try {
       let queuedDocumentCount = 0;
       const failedUploads: string[] = [];
 
       for (const file of files) {
+        if (uploadAbortedRef.current) {
+          break;
+        }
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         try {
           const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
@@ -855,6 +863,30 @@ const App: React.FC = () => {
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleStopProcessing = async () => {
+    setIsStopping(true);
+    uploadAbortedRef.current = true;
+
+    const docsToCancel = uploadSessionDocuments.filter(
+      (doc) => doc.status === 'uploading' || doc.status === 'processing'
+    );
+
+    await Promise.allSettled(
+      docsToCancel.map(async (doc) => {
+        try {
+          const cancelled = await cancelDocument(doc.id);
+          setItems((current) => current.map((entry) => (entry.id === cancelled.id ? cancelled : entry)));
+          setUploadSessionDocs((current) => current.map((entry) => (entry.id === cancelled.id ? cancelled : entry)));
+        } catch (err) {
+          console.error(`Failed to cancel document ${doc.id}`, err);
+        }
+      })
+    );
+
+    setIsStopping(false);
+    setIsStopConfirmOpen(false);
   };
 
   const handleOpenDocument = useCallback((docId: string) => {
@@ -1098,14 +1130,26 @@ const App: React.FC = () => {
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{uploadOverlaySummary}</p>
               </div>
               {!isUploading && (
-                <button
-                  type="button"
-                  onClick={() => setIsOverlayMinimized((v) => !v)}
-                  className="shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-300"
-                  title={isOverlayMinimized ? 'Expandir' : 'Minimizar'}
-                >
-                  {isOverlayMinimized ? <ChevronUpIcon className="h-5 w-5" /> : <ChevronDownIcon className="h-5 w-5" />}
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {hasActiveUploadSessionDocs && (
+                    <button
+                      type="button"
+                      onClick={() => setIsStopConfirmOpen(true)}
+                      className="rounded-full p-2 text-rose-400 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:text-rose-500 dark:hover:bg-rose-900/20 dark:hover:text-rose-400"
+                      title="Detener procesado"
+                    >
+                      <StopCircleIcon className="h-5 w-5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsOverlayMinimized((v) => !v)}
+                    className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-300"
+                    title={isOverlayMinimized ? 'Expandir' : 'Minimizar'}
+                  >
+                    {isOverlayMinimized ? <ChevronUpIcon className="h-5 w-5" /> : <ChevronDownIcon className="h-5 w-5" />}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1165,6 +1209,38 @@ const App: React.FC = () => {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {isStopConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-800">
+            <div className="mb-4 flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="rounded-full bg-rose-100 p-2 dark:bg-rose-900/30">
+                <StopCircleIcon className="h-6 w-6" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Detener procesado</h2>
+            </div>
+            <p className="mb-6 text-slate-600 dark:text-slate-300">
+              ¿Seguro que quieres detener el procesado de los documentos en curso? Las páginas que ya han terminado se conservarán, pero las pendientes quedarán marcadas como error.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <IconActionButton
+                icon={<CloseIcon className="h-4 w-4" />}
+                label="Cancelar"
+                onClick={() => setIsStopConfirmOpen(false)}
+                disabled={isStopping}
+              />
+              <IconActionButton
+                icon={<StopCircleIcon className="h-4 w-4" />}
+                label={isStopping ? 'Deteniendo...' : 'Detener'}
+                isActive
+                variant="danger"
+                onClick={handleStopProcessing}
+                disabled={isStopping}
+              />
+            </div>
           </div>
         </div>
       )}

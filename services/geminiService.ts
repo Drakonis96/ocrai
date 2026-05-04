@@ -307,4 +307,19 @@ const reprocessDocument = async (
   }
 };
 
-export { processPageWithGemini, generateAppLogo, getSavedPrompts, savePrompt, reprocessPage, reprocessDocument };
+const cancelDocument = async (docId: string): Promise<DocumentData> => {
+  const response = await fetch(`/api/documents/${encodeURIComponent(docId)}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new Error(errorData?.error || 'Failed to cancel document');
+  }
+
+  const data = await response.json();
+  return data.document as DocumentData;
+};
+
+export { processPageWithGemini, generateAppLogo, getSavedPrompts, savePrompt, reprocessPage, reprocessDocument, cancelDocument };

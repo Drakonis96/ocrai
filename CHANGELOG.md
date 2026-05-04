@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.2 - 2026-05-04
+
+### Added
+- Added a stop button (⏹) to the processing documents panel that cancels all in-progress documents (upload, rasterization, and OCR phases) after a confirmation modal. Pages already completed are preserved; pending pages are marked as errored.
+
 ## v1.5.1 - 2026-05-04
 
 ### Added

@@ -1945,14 +1945,54 @@ app.post('/api/documents', async (req, res) => {
   }
 });
 
+app.post('/api/documents/:id/cancel', async (req, res) => {
+  try {
+    const safeDocId = assertDocumentId(req.params.id);
+    const docDir = resolveDocumentDir(safeDocId);
+    const metadataPath = path.join(docDir, 'metadata.json');
+
+    if (!fs.existsSync(metadataPath)) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+
+    if (docData.sourceRenderStatus === 'pending' || docData.sourceRenderStatus === 'processing') {
+      docData.sourceRenderStatus = 'error';
+      docData.sourceRenderError = 'Cancelled by user';
+    }
+
+    if (Array.isArray(docData.pages)) {
+      docData.pages = docData.pages.map((page) => {
+        if (page?.status === 'pending' || page?.status === 'processing') {
+          return {
+            ...page,
+            status: 'error',
+            lastError: 'Cancelled by user',
+            errorDismissed: false,
+            nextRetryAt: null,
+          };
+        }
+        return page;
+      });
+    }
+
+    normalizeDocumentRuntimeState(docData);
+    await writeJsonFileAtomic(metadataPath, docData);
+    res.json({ success: true, document: docData });
+  } catch (e) {
+    handleRouteError(res, 'Failed to cancel document', e);
+  }
+});
+
 app.delete('/api/documents/:id', async (req, res) => {
   try {
     const docDir = resolveDocumentDir(req.params.id);
-    
+
     if (fs.existsSync(docDir)) {
       await fs.promises.rm(docDir, { recursive: true, force: true });
     }
-    
+
     res.json({ success: true });
   } catch (e) {
     handleRouteError(res, 'Failed to delete document', e);

@@ -156,6 +156,7 @@ vi.mock('../components/Icons', () => ({
   LogoutIcon: () => null,
   MoonIcon: () => null,
   SettingsIcon: () => null,
+  StopCircleIcon: () => null,
   SunIcon: () => null,
   TrashIcon: () => null,
 }));
