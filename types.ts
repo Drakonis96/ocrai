@@ -52,6 +52,9 @@ export interface DocumentData extends FileSystemItem {
   uploadDate: number; // Keep for compatibility, same as createdAt
   pages: PageData[];
   status: 'uploading' | 'processing' | 'ready' | 'error';
+  sourceRenderStatus?: 'pending' | 'processing' | 'completed' | 'error';
+  sourceRenderCompletedPages?: number;
+  sourceRenderError?: string;
   modelUsed: string;
   ocrProvider?: OcrProvider;
   isRead?: boolean;

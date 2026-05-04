@@ -9,7 +9,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import sharp from 'sharp';
-import { renderPdfToPageImages } from './services/pdfRasterization.js';
+import { getPdfPageCount, renderPdfToPageImages } from './services/pdfRasterization.js';
 import { handleLoginAttempt, verifySession, logoutSession } from './services/authService.js';
 import {
   createDocumentProcessingManager,
@@ -130,6 +130,26 @@ const normalizeUploadedSourceFile = (value) => {
 
   return { mimeType, data, name };
 };
+
+const createPendingRasterizedPage = (pageNumber) => ({
+  pageNumber,
+  imageUrl: '',
+  blocks: [],
+  status: 'pending',
+  blankPage: false,
+  errorDismissed: false,
+  retryCount: 0,
+  lastError: '',
+  nextRetryAt: null,
+  lastAttemptAt: null,
+});
+
+const createRasterizedPageMetadata = (docId, renderedPage, existingPage = null) => ({
+  ...(existingPage && typeof existingPage === 'object' ? existingPage : {}),
+  ...createPendingRasterizedPage(renderedPage.pageNumber),
+  pageNumber: renderedPage.pageNumber,
+  imageUrl: `/api/data/${docId}/page_${renderedPage.pageNumber}.${renderedPage.extension}`,
+});
 
 const normalizePositiveInteger = (value, fallbackValue) => {
   const parsedValue = Number(value);
@@ -1196,6 +1216,116 @@ const { processDocumentBackground, resumePendingDocuments } = createDocumentProc
       }),
 });
 
+const activePdfRasterizations = new Set();
+
+const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false } = {}) => {
+  if (activePdfRasterizations.has(docId)) {
+    return;
+  }
+
+  activePdfRasterizations.add(docId);
+
+  try {
+    const safeDocId = assertDocumentId(docId);
+    const docDir = resolveDocumentDir(safeDocId);
+    const metadataPath = path.join(docDir, 'metadata.json');
+    const sourcePdfPath = path.join(docDir, 'source.pdf');
+
+    if (!fs.existsSync(metadataPath) || !fs.existsSync(sourcePdfPath)) {
+      return;
+    }
+
+    const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+    docData.sourceRenderStatus = 'processing';
+    docData.sourceRenderCompletedPages = 0;
+    delete docData.sourceRenderError;
+    normalizeDocumentRuntimeState(docData);
+    await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+
+    const pdfBuffer = await fs.promises.readFile(sourcePdfPath);
+    let metadataWriteQueue = Promise.resolve();
+
+    const persistRenderedPage = async ({ renderedPage, completedPages, totalPages }) => {
+      const filename = `page_${renderedPage.pageNumber}.${renderedPage.extension}`;
+      await fs.promises.writeFile(path.join(docDir, filename), renderedPage.buffer);
+
+      metadataWriteQueue = metadataWriteQueue
+        .catch(() => {})
+        .then(async () => {
+          if (!fs.existsSync(metadataPath)) {
+            return;
+          }
+
+          const latestDocData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+          const pages = Array.isArray(latestDocData.pages) ? latestDocData.pages.slice() : [];
+          const pageIndex = findPageIndexByNumber(pages, renderedPage.pageNumber, renderedPage.pageNumber - 1);
+
+          pages[pageIndex] = createRasterizedPageMetadata(safeDocId, renderedPage, pages[pageIndex]);
+          latestDocData.pages = pages;
+          latestDocData.totalPages = Math.max(totalPages, latestDocData.totalPages ?? 0, pages.length);
+          latestDocData.processedPages = 0;
+          latestDocData.failedPages = 0;
+          latestDocData.retryingPages = 0;
+          latestDocData.sourceRenderStatus = completedPages >= totalPages ? 'completed' : 'processing';
+          latestDocData.sourceRenderCompletedPages = completedPages;
+          delete latestDocData.sourceRenderError;
+          normalizeDocumentRuntimeState(latestDocData);
+          await fs.promises.writeFile(metadataPath, JSON.stringify(latestDocData, null, 2));
+        });
+
+      await metadataWriteQueue;
+    };
+
+    const renderedPages = await renderPdfToPageImages(pdfBuffer, {
+      onPageRendered: persistRenderedPage,
+    });
+
+    await metadataWriteQueue;
+
+    const latestDocData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+    latestDocData.pages = renderedPages.map((renderedPage, index) => {
+      const existingPage = Array.isArray(latestDocData.pages)
+        ? latestDocData.pages[findPageIndexByNumber(latestDocData.pages, renderedPage.pageNumber, index)]
+        : null;
+
+      return createRasterizedPageMetadata(safeDocId, renderedPage, existingPage);
+    });
+    latestDocData.totalPages = renderedPages.length;
+    latestDocData.processedPages = 0;
+    latestDocData.failedPages = 0;
+    latestDocData.retryingPages = 0;
+    latestDocData.sourceRenderStatus = 'completed';
+    latestDocData.sourceRenderCompletedPages = renderedPages.length;
+    delete latestDocData.sourceRenderError;
+    normalizeDocumentRuntimeState(latestDocData);
+    await fs.promises.writeFile(metadataPath, JSON.stringify(latestDocData, null, 2));
+
+    if (startProcessing) {
+      processDocumentBackground(safeDocId).catch((error) => {
+        console.error(`Background processing trigger failed after rasterizing ${safeDocId}`, error);
+      });
+    }
+  } catch (error) {
+    console.error(`Failed to rasterize uploaded PDF ${docId}`, error);
+
+    try {
+      const docDir = resolveDocumentDir(docId);
+      const metadataPath = path.join(docDir, 'metadata.json');
+      if (fs.existsSync(metadataPath)) {
+        const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+        docData.sourceRenderStatus = 'error';
+        docData.sourceRenderError = formatProcessingError(error);
+        normalizeDocumentRuntimeState(docData);
+        await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+      }
+    } catch (persistError) {
+      console.error(`Failed to persist rasterization error for ${docId}`, persistError);
+    }
+  } finally {
+    activePdfRasterizations.delete(docId);
+  }
+};
+
 app.post('/api/reprocess-page', async (req, res) => {
   const {
     docId,
@@ -1584,34 +1714,18 @@ app.post('/api/documents', async (req, res) => {
 
     if (item.type === 'file' && isUploadedPdf) {
       const pdfBuffer = Buffer.from(uploadedSourceFile.data, 'base64');
-      const renderedPages = await renderPdfToPageImages(pdfBuffer);
       const sourcePdfPath = path.join(docDir, 'source.pdf');
+      const totalPages = await getPdfPageCount(pdfBuffer);
 
       await fs.promises.writeFile(sourcePdfPath, pdfBuffer);
 
       item.pagesPerBatch = getPagesPerBatch(item.pagesPerBatch);
       item.isRead = item.isRead === true;
-      item.pages = [];
-
-      for (const renderedPage of renderedPages) {
-        const filename = `page_${renderedPage.pageNumber}.${renderedPage.extension}`;
-        await fs.promises.writeFile(path.join(docDir, filename), renderedPage.buffer);
-
-        item.pages.push({
-          pageNumber: renderedPage.pageNumber,
-          imageUrl: `/api/data/${item.id}/${filename}`,
-          blocks: [],
-          status: 'pending',
-          blankPage: false,
-          errorDismissed: false,
-          retryCount: 0,
-          lastError: '',
-          nextRetryAt: null,
-          lastAttemptAt: null,
-        });
-      }
-
-      item.totalPages = renderedPages.length;
+      item.sourceRenderStatus = 'pending';
+      item.sourceRenderCompletedPages = 0;
+      delete item.sourceRenderError;
+      item.pages = Array.from({ length: totalPages }, (_, index) => createPendingRasterizedPage(index + 1));
+      item.totalPages = totalPages;
       item.processedPages = 0;
       item.failedPages = 0;
       delete item.sourceFile;
@@ -1690,7 +1804,11 @@ app.post('/api/documents', async (req, res) => {
     );
 
     // Trigger background processing if requested
-    if (item.startProcessing) {
+    if (isUploadedPdf) {
+      rasterizePdfDocumentInBackground(item.id, { startProcessing: item.startProcessing === true }).catch((error) => {
+        console.error('Background PDF rasterization trigger failed', error);
+      });
+    } else if (item.startProcessing) {
         processDocumentBackground(item.id).catch(err => console.error("Background processing trigger failed", err));
     }
 

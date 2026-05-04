@@ -25,6 +25,7 @@ const updateLabelingSettings = vi.fn();
 const getOcrSettings = vi.fn();
 const updateOcrSettings = vi.fn();
 const autodetectProviderModels = vi.fn();
+const alertMock = vi.fn();
 
 vi.mock('../utils/storage', () => ({
   getAllItems,
@@ -77,12 +78,46 @@ vi.mock('../components/Login', () => ({
 }));
 
 vi.mock('../components/UploadView', () => ({
-  default: () => React.createElement('div', null, 'upload'),
+  default: ({ onFileSelect }: { onFileSelect: (files: FileList, options: {
+    model: string;
+    ocrProvider: string;
+    processingMode: 'ocr';
+    removeReferences: boolean;
+    pagesPerBatch: number;
+    splitColumns: boolean;
+  }) => Promise<void> }) => React.createElement('button', {
+    type: 'button',
+    onClick: async () => {
+      const file = new File([new Uint8Array([37, 80, 68, 70])], 'upload.pdf', { type: 'application/pdf' });
+      await onFileSelect({
+        0: file,
+        length: 1,
+        item: (index: number) => (index === 0 ? file : null),
+      } as unknown as FileList, {
+        model: 'gemini-flash-latest',
+        ocrProvider: 'gemini',
+        processingMode: 'ocr',
+        removeReferences: true,
+        pagesPerBatch: 1,
+        splitColumns: false,
+      });
+    },
+  }, 'start upload'),
 }));
 
 vi.mock('../components/Dashboard', () => ({
-  default: ({ items }: { items: DocumentData[] }) =>
+  default: ({
+    items,
+    onNewUpload,
+  }: {
+    items: DocumentData[];
+    onNewUpload: () => void;
+  }) => React.createElement(
+    'div',
+    null,
     React.createElement('div', { 'data-testid': 'dashboard' }, `items:${items.length}`),
+    React.createElement('button', { type: 'button', onClick: onNewUpload }, 'new upload')
+  ),
 }));
 
 vi.mock('../components/Editor/EditorView', () => ({
@@ -180,6 +215,7 @@ describe('App processing polling', () => {
 
     getAllItems.mockReset();
     getAllItems.mockResolvedValue([processingDocument]);
+    saveItem.mockReset();
     getModels.mockReset();
     getModels.mockResolvedValue([{ id: 'gemini-flash-latest', name: 'Gemini Flash Latest', description: 'Balanced', provider: 'gemini' }]);
     getOcrSettings.mockReset();
@@ -206,6 +242,8 @@ describe('App processing polling', () => {
 
       throw new Error(`Unexpected fetch: ${String(input)}`);
     }));
+    vi.stubGlobal('alert', alertMock);
+    alertMock.mockReset();
 
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -214,6 +252,20 @@ describe('App processing polling', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       }),
+    });
+
+    vi.stubGlobal('FileReader', class MockFileReader {
+      result = 'data:application/pdf;base64,JVBERi0x';
+
+      onload: ((this: FileReader, ev: ProgressEvent<FileReader>) => unknown) | null = null;
+
+      onerror: ((this: FileReader, ev: ProgressEvent<FileReader>) => unknown) | null = null;
+
+      readAsDataURL() {
+        if (this.onload) {
+          this.onload.call(this as unknown as FileReader, new ProgressEvent('load'));
+        }
+      }
     });
   });
 
@@ -243,5 +295,116 @@ describe('App processing polling', () => {
     });
 
     expect(getAllItems.mock.calls.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('shows per-document progress while uploaded PDFs are still being rasterized or processed', async () => {
+    const { default: App } = await import('../App');
+    getAllItems.mockResolvedValue([]);
+    saveItem.mockImplementation(async (item: DocumentData) => ({
+      ...item,
+      status: 'uploading',
+      sourceRenderStatus: 'processing',
+      sourceRenderCompletedPages: 2,
+      totalPages: 5,
+      pages: Array.from({ length: 5 }, (_, index) => ({
+        pageNumber: index + 1,
+        imageUrl: index < 2 ? `/api/data/${item.id}/page_${index + 1}.jpg` : '',
+        blocks: [],
+        status: 'pending',
+        errorDismissed: false,
+        retryCount: 0,
+        lastError: '',
+        nextRetryAt: null,
+        lastAttemptAt: null,
+      })),
+    }));
+
+    await act(async () => {
+      root.render(React.createElement(App));
+      await flushPromises();
+    });
+
+    const openUploadButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'new upload');
+    expect(openUploadButton).not.toBeUndefined();
+
+    await act(async () => {
+      openUploadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushPromises();
+    });
+
+    const startUploadButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'start upload');
+    expect(startUploadButton).not.toBeUndefined();
+
+    await act(async () => {
+      startUploadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushPromises();
+    });
+
+    expect(saveItem).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('items:1');
+    expect(container.textContent).toContain('Processing document...');
+    expect(container.textContent).toContain('upload.pdf');
+    expect(container.textContent).toContain('Rendering page images');
+    expect(container.textContent).toContain('2 / 5 pages');
+    expect(container.textContent).toContain('40%');
+    expect(container.querySelector('[data-testid="upload-progress-shell"]')?.getAttribute('data-mode')).toBe('panel');
+    expect(alertMock).not.toHaveBeenCalled();
+  });
+
+  it('recovers documents that were queued server-side even if the save request errors client-side', async () => {
+    const { default: App } = await import('../App');
+    let recoveredDoc: DocumentData | null = null;
+
+    getAllItems.mockImplementation(async () => (recoveredDoc ? [recoveredDoc] : []));
+    saveItem.mockImplementation(async (item: DocumentData) => {
+      recoveredDoc = {
+        ...item,
+        status: 'uploading',
+        sourceRenderStatus: 'processing',
+        sourceRenderCompletedPages: 1,
+        totalPages: 4,
+        pages: Array.from({ length: 4 }, (_, index) => ({
+          pageNumber: index + 1,
+          imageUrl: index === 0 ? `/api/data/${item.id}/page_${index + 1}.jpg` : '',
+          blocks: [],
+          status: 'pending',
+          errorDismissed: false,
+          retryCount: 0,
+          lastError: '',
+          nextRetryAt: null,
+          lastAttemptAt: null,
+        })),
+      };
+
+      throw new Error('Network error while reading the upload response');
+    });
+
+    await act(async () => {
+      root.render(React.createElement(App));
+      await flushPromises();
+    });
+
+    const openUploadButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'new upload');
+    expect(openUploadButton).not.toBeUndefined();
+
+    await act(async () => {
+      openUploadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushPromises();
+    });
+
+    const startUploadButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'start upload');
+    expect(startUploadButton).not.toBeUndefined();
+
+    await act(async () => {
+      startUploadButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flushPromises();
+    });
+
+    expect(saveItem).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('items:1');
+    expect(container.textContent).toContain('upload.pdf');
+    expect(container.textContent).toContain('1 / 4 pages');
+    expect(container.querySelector('[data-testid="upload-progress-shell"]')?.getAttribute('data-mode')).toBe('panel');
+    expect(alertMock).not.toHaveBeenCalled();
   });
 });

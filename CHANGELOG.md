@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.4.3 - 2026-05-04
+
+### Added
+- Added per-document upload progress cards that track PDF rasterization and OCR page processing after files are queued.
+
+### Changed
+- Moved PDF rasterization fully into the background upload pipeline so large PDF uploads return earlier and progress can be polled incrementally.
+- Changed the upload progress UI from a blocking full-screen modal to a non-blocking floating panel once documents are already queued.
+- Updated dashboard processing bars so documents in the rasterization phase are shown as `Uploading` instead of generic processing.
+
+### Fixed
+- Fixed false `Failed to upload` client errors that could appear even when the server had already persisted the document and continued processing it.
+- Fixed the dashboard state so queued documents are inserted or recovered immediately without requiring a manual page refresh.
+- Fixed resume logic so OCR does not start for documents whose source PDF pages are still being rasterized.
+
+### Testing
+- Added regression coverage for upload-progress polling recovery, source-rasterization document state normalization, and rasterization progress callbacks.
+- Verified focused regression tests plus production build before release.
+
 ## v1.4.0 - 2026-04-01
 
 ### Added

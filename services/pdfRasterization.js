@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 
 const DEFAULT_PDF_RENDER_SCALE = 2;
+const DEFAULT_PDF_RENDER_CONCURRENCY = 4;
 const PDF_MAX_RENDER_DIMENSION = 3072;
 const PDF_MAX_RENDER_PIXELS = 12_000_000;
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +28,16 @@ const normalizePositiveNumber = (value, fallbackValue) => {
   }
 
   return parsedValue > 0 ? parsedValue : fallbackValue;
+};
+
+const normalizePositiveInteger = (value, fallbackValue) => {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue)) {
+    return fallbackValue;
+  }
+
+  const normalizedValue = Math.trunc(parsedValue);
+  return normalizedValue > 0 ? normalizedValue : fallbackValue;
 };
 
 const getSafePdfRenderScale = (viewport, requestedScale = DEFAULT_PDF_RENDER_SCALE) => {
@@ -67,25 +78,44 @@ class NodeCanvasFactory {
   }
 }
 
-export const renderPdfToPageImages = async (pdfBuffer, options = {}) => {
-  const requestedScale = normalizePositiveNumber(options.scale, DEFAULT_PDF_RENDER_SCALE);
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(pdfBuffer),
-    disableWorker: true,
-    useWorkerFetch: false,
-    useWasm: true,
-    useSystemFonts: true,
-    isEvalSupported: false,
-    cMapPacked: true,
-    ...PDFJS_ASSET_URLS,
-  });
-  const pdf = await loadingTask.promise;
-  const canvasFactory = new NodeCanvasFactory();
+const createPdfLoadingTask = (pdfBuffer) => pdfjsLib.getDocument({
+  data: new Uint8Array(pdfBuffer),
+  disableWorker: true,
+  useWorkerFetch: false,
+  useWasm: true,
+  useSystemFonts: true,
+  isEvalSupported: false,
+  cMapPacked: true,
+  ...PDFJS_ASSET_URLS,
+});
+
+export const getPdfPageCount = async (pdfBuffer) => {
+  const loadingTask = createPdfLoadingTask(pdfBuffer);
 
   try {
-    const renderedPages = [];
+    const pdf = await loadingTask.promise;
+    return pdf.numPages;
+  } finally {
+    await loadingTask.destroy();
+  }
+};
 
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+export const renderPdfToPageImages = async (pdfBuffer, options = {}) => {
+  const requestedScale = normalizePositiveNumber(options.scale, DEFAULT_PDF_RENDER_SCALE);
+  const loadingTask = createPdfLoadingTask(pdfBuffer);
+  const pdf = await loadingTask.promise;
+  const canvasFactory = new NodeCanvasFactory();
+  const onPageRendered = typeof options.onPageRendered === 'function' ? options.onPageRendered : null;
+  const renderConcurrency = Math.min(
+    normalizePositiveInteger(options.concurrency, DEFAULT_PDF_RENDER_CONCURRENCY),
+    pdf.numPages || 1
+  );
+
+  try {
+    const renderedPages = new Array(pdf.numPages);
+    let completedPages = 0;
+
+    const renderPage = async (pageNumber) => {
       const page = await pdf.getPage(pageNumber);
 
       try {
@@ -110,18 +140,44 @@ export const renderPdfToPageImages = async (pdfBuffer, options = {}) => {
           .jpeg({ quality: 90, mozjpeg: true })
           .toBuffer();
 
-        renderedPages.push({
+        renderedPages[pageNumber - 1] = {
           pageNumber,
           mimeType: 'image/jpeg',
           extension: 'jpg',
           buffer: jpegBuffer,
-        });
+        };
+
+        completedPages += 1;
+
+        if (onPageRendered) {
+          await onPageRendered({
+            renderedPage: renderedPages[pageNumber - 1],
+            completedPages,
+            totalPages: pdf.numPages,
+          });
+        }
 
         canvasFactory.destroy({ canvas, context });
       } finally {
         page.cleanup();
       }
-    }
+
+      return renderedPages[pageNumber - 1];
+    };
+
+    let nextPageNumber = 1;
+    await Promise.all(Array.from({ length: renderConcurrency }, async () => {
+      while (true) {
+        const pageNumber = nextPageNumber;
+        nextPageNumber += 1;
+
+        if (pageNumber > pdf.numPages) {
+          return;
+        }
+
+        await renderPage(pageNumber);
+      }
+    }));
 
     return renderedPages;
   } finally {

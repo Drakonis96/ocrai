@@ -2194,16 +2194,20 @@ const StatusWithProgress = memo(({
   }
 
   const percentage = total > 0 ? Math.round((processed / total) * 100) : 0;
+  const progressLabel = status === 'uploading' ? 'Uploading' : 'Processing';
+  const progressBarClassName = status === 'uploading'
+    ? 'h-2 rounded-full bg-amber-500 transition-all duration-300 dark:bg-amber-400'
+    : 'h-2 rounded-full bg-blue-600 transition-all duration-300 dark:bg-blue-500';
 
   return (
     <div className="w-full max-w-[220px]">
       <div className="mb-1 flex justify-between text-xs text-slate-600 dark:text-slate-400">
-        <span>Processing</span>
+        <span>{progressLabel}</span>
         <span>{processed}/{total}</span>
       </div>
       <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700">
         <div
-          className="h-2 rounded-full bg-blue-600 transition-all duration-300 dark:bg-blue-500"
+          className={progressBarClassName}
           style={{ width: `${percentage}%` }}
         />
       </div>

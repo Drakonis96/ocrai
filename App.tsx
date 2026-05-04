@@ -81,11 +81,119 @@ const reconcileItems = (currentItems: FileSystemItem[], nextItems: FileSystemIte
   return hasChanges ? reconciledItems : currentItems;
 };
 
+const upsertItem = (currentItems: FileSystemItem[], nextItem: FileSystemItem) => {
+  const currentIndex = currentItems.findIndex((item) => item.id === nextItem.id);
+  if (currentIndex === -1) {
+    return [...currentItems, nextItem];
+  }
+
+  const currentItem = currentItems[currentIndex];
+  if (areItemsEqual(currentItem, nextItem)) {
+    return currentItems;
+  }
+
+  const nextItems = currentItems.slice();
+  nextItems[currentIndex] = nextItem;
+  return nextItems;
+};
+
 const collectDescendantItemIds = (sourceItems: FileSystemItem[], parentId: string): string[] => (
   sourceItems
     .filter((item) => item.parentId === parentId)
     .flatMap((child) => [child.id, ...collectDescendantItemIds(sourceItems, child.id)])
 );
+
+const isDocumentInFlight = (doc: DocumentData) => doc.status === 'processing' || doc.status === 'uploading';
+
+const getDocumentPageTotal = (doc: DocumentData) => Math.max(
+  Number.isFinite(doc.totalPages) ? doc.totalPages : 0,
+  Array.isArray(doc.pages) ? doc.pages.length : 0
+);
+
+const getUploadProgressSummary = (doc: DocumentData) => {
+  const totalPages = getDocumentPageTotal(doc);
+
+  if (doc.status === 'uploading' && totalPages === 0) {
+    return {
+      phase: 'Uploading file',
+      detail: 'Sending the document to the server.',
+      remainingLabel: 'Starting...',
+      current: 0,
+      total: 0,
+      percent: null,
+      tone: 'blue',
+      indeterminate: true,
+    };
+  }
+
+  if (doc.sourceRenderStatus === 'pending' || doc.sourceRenderStatus === 'processing') {
+    const completedPages = totalPages > 0
+      ? Math.min(Math.max(doc.sourceRenderCompletedPages ?? 0, 0), totalPages)
+      : 0;
+    const remainingPages = Math.max(totalPages - completedPages, 0);
+
+    return {
+      phase: totalPages > 0 ? 'Rendering page images' : 'Preparing PDF',
+      detail: totalPages > 0
+        ? `${completedPages} of ${totalPages} pages are ready for OCR.`
+        : 'Counting pages and preparing the document for OCR.',
+      remainingLabel: remainingPages > 0 ? `${remainingPages} pages left` : 'Almost ready',
+      current: completedPages,
+      total: totalPages,
+      percent: totalPages > 0 ? Math.round((completedPages / totalPages) * 100) : null,
+      tone: 'blue',
+      indeterminate: totalPages === 0,
+    };
+  }
+
+  const total = Math.max(totalPages, 1);
+  const processedPages = Math.max(doc.processedPages ?? 0, 0);
+  const failedPages = Math.max(doc.failedPages ?? 0, 0);
+  const retryingPages = Math.max(doc.retryingPages ?? 0, 0);
+  const completedPages = Math.min(processedPages + failedPages, total);
+  const remainingPages = Math.max(total - completedPages, 0);
+
+  if (doc.status === 'ready') {
+    return {
+      phase: 'Completed',
+      detail: `${processedPages} of ${total} pages processed successfully.`,
+      remainingLabel: 'Ready',
+      current: total,
+      total,
+      percent: 100,
+      tone: 'emerald',
+      indeterminate: false,
+    };
+  }
+
+  if (doc.status === 'error' && remainingPages === 0) {
+    return {
+      phase: 'Completed with issues',
+      detail: failedPages > 0
+        ? `${failedPages} pages finished with errors.`
+        : 'The document finished with an error.',
+      remainingLabel: 'Review needed',
+      current: total,
+      total,
+      percent: 100,
+      tone: 'rose',
+      indeterminate: false,
+    };
+  }
+
+  return {
+    phase: 'Processing pages',
+    detail: retryingPages > 0
+      ? `${processedPages} done, ${retryingPages} queued for retry.`
+      : `${completedPages} of ${total} pages processed.`,
+    remainingLabel: remainingPages > 0 ? `${remainingPages} pages left` : 'Finishing...',
+    current: completedPages,
+    total,
+    percent: Math.round((completedPages / total) * 100),
+    tone: doc.status === 'error' ? 'rose' : 'blue',
+    indeterminate: false,
+  };
+};
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
@@ -93,6 +201,7 @@ const App: React.FC = () => {
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadSessionDocs, setUploadSessionDocs] = useState<DocumentData[]>([]);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -212,8 +321,31 @@ const App: React.FC = () => {
   }, [isDarkMode]);
 
   const hasProcessingItems = items.some(
-    (item) => item.type === 'file' && (item as DocumentData).status === 'processing'
+    (item) => item.type === 'file' && ((item as DocumentData).status === 'processing' || (item as DocumentData).status === 'uploading')
   );
+  const uploadSessionDocuments = useMemo(() => {
+    if (uploadSessionDocs.length === 0) {
+      return [];
+    }
+
+    const documentsById = new Map(
+      items
+        .filter((item): item is DocumentData => item.type === 'file')
+        .map((item) => [item.id, item])
+    );
+
+    return uploadSessionDocs
+      .map((doc) => documentsById.get(doc.id) ?? doc)
+      .sort((left, right) => Number(isDocumentInFlight(right)) - Number(isDocumentInFlight(left)) || left.createdAt - right.createdAt);
+  }, [items, uploadSessionDocs]);
+  const hasActiveUploadSessionDocs = uploadSessionDocuments.some(isDocumentInFlight);
+  const showUploadProgressOverlay = isUploading || uploadSessionDocuments.length > 0;
+  const uploadProgressMode = isUploading ? 'modal' : 'panel';
+  const uploadOverlaySummary = uploadSessionDocuments.length === 0
+    ? 'Preparing and uploading your files.'
+    : hasActiveUploadSessionDocs
+      ? `Tracking ${uploadSessionDocuments.length} document${uploadSessionDocuments.length === 1 ? '' : 's'} through image rendering and OCR.`
+      : `${uploadSessionDocuments.length} document${uploadSessionDocuments.length === 1 ? '' : 's'} finished processing.`;
 
   useEffect(() => {
     if (!hasProcessingItems) {
@@ -226,6 +358,16 @@ const App: React.FC = () => {
 
     return () => window.clearInterval(timer);
   }, [hasProcessingItems, loadItems]);
+
+  useEffect(() => {
+    if (isUploading || uploadSessionDocuments.length === 0) {
+      return;
+    }
+
+    if (uploadSessionDocuments.every((doc) => !isDocumentInFlight(doc))) {
+      setUploadSessionDocs([]);
+    }
+  }, [isUploading, uploadSessionDocuments]);
 
   const handleLogout = async () => {
     try {
@@ -523,71 +665,122 @@ const App: React.FC = () => {
   const handleFileSelect = async (fileList: FileList, options: ProcessingOptions) => {
     const files = Array.from(fileList);
     setIsUploading(true);
+    setUploadSessionDocs([]);
 
     try {
-      const newDocs: DocumentData[] = [];
+      let queuedDocumentCount = 0;
+      const failedUploads: string[] = [];
 
       for (const file of files) {
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        const imageData = isPdf
-          ? []
-          : [{ data: await fileToBase64(file), mimeType: file.type }];
+        try {
+          const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+          const imageData = isPdf
+            ? []
+            : [{ data: await fileToBase64(file), mimeType: file.type }];
 
-        const newDoc: DocumentData = {
-          id: docId,
-          name: file.name,
-          type: 'file',
-          parentId: currentFolderId,
-          createdAt: Date.now(),
-          uploadDate: Date.now(),
-          status: 'processing',
-          modelUsed: options.model,
-          ocrProvider: options.ocrProvider ?? ocrSettings.provider,
-          isRead: false,
-          labels: [],
-          processingMode: options.processingMode,
-          targetLanguage: options.targetLanguage,
-          customPrompt: options.customPrompt,
-          removeReferences: options.removeReferences,
-          pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
-          splitColumns: options.splitColumns === true,
-          totalPages: imageData.length,
-          processedPages: 0,
-          failedPages: 0,
-          pages: imageData.map((image, index) => ({
-            pageNumber: index + 1,
-            imageUrl: `data:${image.mimeType};base64,${image.data}`,
-            blocks: [],
-            status: 'pending',
-            errorDismissed: false,
-            retryCount: 0,
-            lastError: '',
-            nextRetryAt: null,
-            lastAttemptAt: null,
-          })),
-        };
+          const newDoc: DocumentData = {
+            id: docId,
+            name: file.name,
+            type: 'file',
+            parentId: currentFolderId,
+            createdAt: Date.now(),
+            uploadDate: Date.now(),
+            status: isPdf ? 'uploading' : 'processing',
+            sourceRenderCompletedPages: 0,
+            modelUsed: options.model,
+            ocrProvider: options.ocrProvider ?? ocrSettings.provider,
+            isRead: false,
+            labels: [],
+            processingMode: options.processingMode,
+            targetLanguage: options.targetLanguage,
+            customPrompt: options.customPrompt,
+            removeReferences: options.removeReferences,
+            pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
+            splitColumns: options.splitColumns === true,
+            totalPages: imageData.length,
+            processedPages: 0,
+            failedPages: 0,
+            pages: imageData.map((image, index) => ({
+              pageNumber: index + 1,
+              imageUrl: `data:${image.mimeType};base64,${image.data}`,
+              blocks: [],
+              status: 'pending',
+              errorDismissed: false,
+              retryCount: 0,
+              lastError: '',
+              nextRetryAt: null,
+              lastAttemptAt: null,
+            })),
+          };
 
-        const uploadPayload = isPdf
-          ? {
-              ...newDoc,
-              sourceFile: {
-                name: file.name,
-                mimeType: 'application/pdf',
-                data: await fileToBase64(file),
-              },
+          setUploadSessionDocs((current) => [...current, newDoc]);
+
+          const uploadPayload = isPdf
+            ? {
+                ...newDoc,
+                sourceFile: {
+                  name: file.name,
+                  mimeType: 'application/pdf',
+                  data: await fileToBase64(file),
+                },
+              }
+            : newDoc;
+
+          const savedDoc = await saveItem(uploadPayload as DocumentData, true) as DocumentData;
+          queuedDocumentCount += 1;
+          setItems((current) => upsertItem(current, savedDoc));
+          setUploadSessionDocs((current) => current.map((entry) => (entry.id === savedDoc.id ? savedDoc : entry)));
+          setCurrentView(AppView.DASHBOARD);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
+          console.error('Processing init failed', error);
+
+          try {
+            const refreshedItems = await getAllItems();
+            const recoveredDoc = refreshedItems.find(
+              (entry): entry is DocumentData => entry.type === 'file' && entry.id === docId
+            );
+
+            startTransition(() => {
+              setItems((current) => reconcileItems(current, refreshedItems));
+            });
+
+            if (recoveredDoc) {
+              queuedDocumentCount += 1;
+              setUploadSessionDocs((current) => current.map((entry) => (entry.id === recoveredDoc.id ? recoveredDoc : entry)));
+              setCurrentView(AppView.DASHBOARD);
+              continue;
             }
-          : newDoc;
+          } catch (refreshError) {
+            console.error('Failed to refresh documents after upload error', refreshError);
+          }
 
-        const savedDoc = await saveItem(uploadPayload as DocumentData, true) as DocumentData;
-        newDocs.push(savedDoc);
+          failedUploads.push(`${file.name}: ${errorMessage}`);
+          setUploadSessionDocs((current) => current.map((entry) => (
+            entry.id === docId
+              ? {
+                  ...entry,
+                  status: 'error',
+                  sourceRenderError: errorMessage,
+                }
+              : entry
+          )));
+        }
       }
 
-      setItems((current) => [...current, ...newDocs]);
-      setCurrentView(AppView.DASHBOARD);
-    } catch (error: any) {
-      console.error('Processing init failed', error);
-      alert(`Failed to upload: ${error.message}`);
+      if (queuedDocumentCount > 0) {
+        setCurrentView(AppView.DASHBOARD);
+      }
+
+      if (failedUploads.length > 0) {
+        const intro = queuedDocumentCount > 0
+          ? `Queued ${queuedDocumentCount} document${queuedDocumentCount === 1 ? '' : 's'}, but ${failedUploads.length} failed to start.`
+          : 'Failed to upload the selected documents.';
+        const details = failedUploads.slice(0, 3).join('\n');
+        const suffix = failedUploads.length > 3 ? `\n…and ${failedUploads.length - 3} more.` : '';
+        alert(`${intro}\n\n${details}${suffix}`);
+      }
     } finally {
       setIsUploading(false);
     }
@@ -814,11 +1007,80 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {isUploading && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm dark:bg-slate-900/80">
-          <LoaderIcon className="mb-4 h-12 w-12 animate-spin text-blue-600" />
-          <h2 className="text-xl font-bold text-slate-800 dark:text-white">Processing document...</h2>
-          <p className="text-slate-500 dark:text-slate-400">Preparing and uploading your file</p>
+      {showUploadProgressOverlay && (
+        <div
+          data-testid="upload-progress-shell"
+          data-mode={uploadProgressMode}
+          className={isUploading
+            ? 'fixed inset-0 z-50 flex items-center justify-center bg-white/80 p-4 backdrop-blur-sm dark:bg-slate-900/80'
+            : 'pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 sm:justify-end sm:px-6'}
+        >
+          <div className={`pointer-events-auto w-full rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-800/95 ${isUploading ? 'max-w-3xl' : 'max-w-2xl sm:max-w-lg'}`}>
+            <div className="mb-6 flex items-start gap-4">
+              <div className="rounded-2xl bg-blue-100 p-3 dark:bg-blue-500/10">
+                <LoaderIcon className={`h-8 w-8 text-blue-600 dark:text-blue-400 ${hasActiveUploadSessionDocs || isUploading ? 'animate-spin' : ''}`} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-slate-800 dark:text-white">
+                  {uploadSessionDocuments.length === 1 ? 'Processing document...' : 'Processing documents...'}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{uploadOverlaySummary}</p>
+              </div>
+            </div>
+
+            {uploadSessionDocuments.length > 0 ? (
+              <div className={`space-y-3 overflow-y-auto pr-1 ${isUploading ? 'max-h-[60vh]' : 'max-h-[50vh]'}`}>
+                {uploadSessionDocuments.map((doc) => {
+                  const progress = getUploadProgressSummary(doc);
+                  const barClassName = progress.tone === 'emerald'
+                    ? 'bg-emerald-500'
+                    : progress.tone === 'rose'
+                      ? 'bg-rose-500'
+                      : 'bg-blue-600 dark:bg-blue-400';
+
+                  return (
+                    <div
+                      key={doc.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 dark:border-slate-700 dark:bg-slate-900/40"
+                    >
+                      <div className="mb-3 flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-semibold text-slate-800 dark:text-white">{doc.name}</h3>
+                          <p className="mt-1 text-xs font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{progress.phase}</p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                            {progress.total > 0 ? `${progress.current} / ${progress.total} pages` : 'Starting...'}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            {progress.percent === null ? 'Preparing' : `${progress.percent}%`}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                        <div
+                          className={`${barClassName} h-full rounded-full ${progress.indeterminate ? 'animate-pulse' : 'transition-[width] duration-500 ease-out'}`}
+                          style={{ width: progress.percent === null ? '20%' : `${progress.percent}%` }}
+                        />
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                        <span>{progress.detail}</span>
+                        <span className="shrink-0">{progress.remainingLabel}</span>
+                      </div>
+
+                      {doc.sourceRenderError && doc.status === 'error' && (
+                        <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{doc.sourceRenderError}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 dark:text-slate-400">Preparing and uploading your files.</p>
+            )}
+          </div>
         </div>
       )}
 

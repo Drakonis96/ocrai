@@ -35,6 +35,14 @@ const normalizeTimestamp = (value) => {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : null;
 };
 
+const normalizeSourceRenderStatus = (value) => {
+  if (value === 'pending' || value === 'processing' || value === 'completed' || value === 'error') {
+    return value;
+  }
+
+  return 'completed';
+};
+
 export const getPagesPerBatch = (value, fallbackValue = 1) =>
   normalizePositiveInteger(value, fallbackValue);
 
@@ -185,6 +193,7 @@ const normalizePageState = (page, pageIndex, { resetInFlightProcessing = false }
 
 export const normalizeDocumentRuntimeState = (docData, { resetInFlightProcessing = false } = {}) => {
   const normalizedDocument = docData;
+  normalizedDocument.sourceRenderStatus = normalizeSourceRenderStatus(normalizedDocument.sourceRenderStatus);
   normalizedDocument.pages = Array.isArray(normalizedDocument.pages)
     ? normalizedDocument.pages.map((page, index) => normalizePageState(page, index, { resetInFlightProcessing }))
     : [];
@@ -193,14 +202,45 @@ export const normalizeDocumentRuntimeState = (docData, { resetInFlightProcessing
     normalizeNonNegativeInteger(normalizedDocument.totalPages, normalizedDocument.pages.length),
     normalizedDocument.pages.length
   );
+  normalizedDocument.sourceRenderCompletedPages = Math.min(
+    normalizeNonNegativeInteger(
+      normalizedDocument.sourceRenderCompletedPages,
+      normalizedDocument.sourceRenderStatus === 'completed' ? normalizedDocument.totalPages : 0
+    ),
+    normalizedDocument.totalPages
+  );
+  if (typeof normalizedDocument.sourceRenderError === 'string' && normalizedDocument.sourceRenderError.trim()) {
+    normalizedDocument.sourceRenderError = normalizedDocument.sourceRenderError.trim();
+  } else {
+    delete normalizedDocument.sourceRenderError;
+  }
   normalizedDocument.processedPages = getProcessedPageCount(normalizedDocument.pages);
   normalizedDocument.failedPages = getFailedPageCount(normalizedDocument.pages);
   normalizedDocument.retryingPages = getRetryQueueCount(normalizedDocument.pages);
+
+  if (normalizedDocument.sourceRenderStatus === 'pending' || normalizedDocument.sourceRenderStatus === 'processing') {
+    normalizedDocument.status = 'uploading';
+    normalizedDocument.processedPages = 0;
+    normalizedDocument.failedPages = 0;
+    normalizedDocument.retryingPages = 0;
+    return normalizedDocument;
+  }
+
+  if (normalizedDocument.sourceRenderStatus === 'error') {
+    normalizedDocument.status = 'error';
+    normalizedDocument.processedPages = 0;
+    normalizedDocument.failedPages = 0;
+    normalizedDocument.retryingPages = 0;
+    return normalizedDocument;
+  }
+
   normalizedDocument.status = getDocumentStatus(normalizedDocument.pages);
   return normalizedDocument;
 };
 
 const documentNeedsBackgroundProcessing = (docData) =>
+  (!docData?.sourceRenderStatus || docData.sourceRenderStatus === 'completed')
+  &&
   Array.isArray(docData?.pages)
   && docData.pages.some((page) => page?.status !== 'completed' && page?.status !== 'error');
 
@@ -486,11 +526,11 @@ export const createDocumentProcessingManager = ({
         try {
           const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
           normalizeDocumentRuntimeState(docData, { resetInFlightProcessing: true });
+          await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
           if (!documentNeedsBackgroundProcessing(docData)) {
             return;
           }
 
-          await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
           await processDocumentBackground(entry.name);
         } catch (error) {
           logger.error(`Failed to resume processing for ${entry.name}:`, error);

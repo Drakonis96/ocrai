@@ -93,6 +93,21 @@ afterEach(async () => {
 });
 
 describe('document processing manager', () => {
+  it('keeps documents in uploading status while source PDF rasterization is still pending', () => {
+    const doc = createMetadata({
+      docId: 'doc-uploading',
+      pages: [createPage('doc-uploading', 1), createPage('doc-uploading', 2)],
+    });
+
+    doc.sourceRenderStatus = 'pending';
+    normalizeDocumentRuntimeState(doc);
+
+    expect(doc.status).toBe('uploading');
+    expect(doc.processedPages).toBe(0);
+    expect(doc.failedPages).toBe(0);
+    expect(doc.totalPages).toBe(2);
+  });
+
   it('treats dismissed page errors as resolved in document totals', () => {
     const doc = createMetadata({
       docId: 'doc-dismissed-error',
@@ -204,6 +219,29 @@ describe('document processing manager', () => {
     expect(stored.failedPages).toBe(0);
     expect(stored.pages[0].status).toBe('completed');
     expect(stored.pages[0].retryCount).toBe(0);
+  });
+
+  it('does not start OCR for documents whose PDF pages are still being rasterized', async () => {
+    const docId = 'doc-rasterizing';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    metadata.sourceRenderStatus = 'pending';
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    let wasProcessPageCalled = false;
+    const manager = createManager(dataDir, async () => {
+      wasProcessPageCalled = true;
+      return createBlocks(1);
+    });
+
+    await manager.resumePendingDocuments();
+
+    const stored = await readMetadata(docDir);
+    expect(wasProcessPageCalled).toBe(false);
+    expect(stored.status).toBe('uploading');
+    expect(stored.pages[0].status).toBe('pending');
   });
 
   it('tracks mixed completion and failure across pages', async () => {

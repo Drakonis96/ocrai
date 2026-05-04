@@ -49,4 +49,26 @@ describe('server-side PDF rasterization', () => {
     expect(renderedPages[0].extension).toBe('jpg');
     expect(renderedPages[0].buffer.length).toBeGreaterThan(0);
   });
+
+  it('reports page progress as pages finish rendering', async () => {
+    const progressUpdates = [];
+
+    await renderPdfToPageImages(MINIMAL_PDF_BUFFER, {
+      onPageRendered: (update) => {
+        progressUpdates.push({
+          pageNumber: update.renderedPage.pageNumber,
+          completedPages: update.completedPages,
+          totalPages: update.totalPages,
+        });
+      },
+    });
+
+    expect(progressUpdates).toEqual([
+      {
+        pageNumber: 1,
+        completedPages: 1,
+        totalPages: 1,
+      },
+    ]);
+  });
 });
