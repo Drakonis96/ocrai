@@ -14,6 +14,9 @@ interface MoveItemDialogProps {
   isOpen: boolean;
   itemName: string;
   itemType: 'file' | 'folder';
+  title?: string;
+  submitLabel?: string;
+  submitSavingLabel?: string;
   destinations: MoveDestinationOption[];
   selectedDestinationId: string | null;
   currentDestinationId: string | null;
@@ -28,6 +31,9 @@ const MoveItemDialog: React.FC<MoveItemDialogProps> = ({
   isOpen,
   itemName,
   itemType,
+  title,
+  submitLabel,
+  submitSavingLabel,
   destinations,
   selectedDestinationId,
   currentDestinationId,
@@ -52,7 +58,7 @@ const MoveItemDialog: React.FC<MoveItemDialogProps> = ({
             <MoveIcon className="h-6 w-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Move {itemType === 'folder' ? 'folder' : 'document'}</h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{title ?? `Move ${itemType === 'folder' ? 'folder' : 'document'}`}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Choose where <span className="font-medium text-slate-700 dark:text-slate-200">{itemName}</span> should live.
             </p>
@@ -109,7 +115,7 @@ const MoveItemDialog: React.FC<MoveItemDialogProps> = ({
           />
           <IconActionButton
             icon={<CheckCircleIcon className="h-4 w-4" />}
-            label={isSaving ? 'Moving item' : 'Move item'}
+            label={isSaving ? (submitSavingLabel ?? 'Moving item') : (submitLabel ?? 'Move item')}
             isActive
             variant="primary"
             disabled={isSaving || selectedDestinationId === currentDestinationId}

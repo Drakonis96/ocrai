@@ -221,4 +221,189 @@ describe('Dashboard document actions', () => {
 
     expect(onReprocessDocument).toHaveBeenCalledWith('doc-1', 'gemini-flash-lite-latest', 5, false);
   });
+
+  it('moves multiple selected documents together from the checkbox column', async () => {
+    const onMoveItem = vi.fn(async () => {});
+
+    await act(async () => {
+      root.render(
+        <Dashboard
+          items={[
+            buildDocument(),
+            buildDocument({ id: 'doc-2', name: 'sample-2.pdf' }),
+            buildFolder(),
+          ]}
+          models={DASHBOARD_MODELS}
+          currentFolderId={null}
+          onOpenDocument={vi.fn()}
+          onNewUpload={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onNavigateFolder={vi.fn()}
+          onDeleteItem={vi.fn()}
+          onMoveItem={onMoveItem}
+          onRenameDocument={vi.fn(async () => {})}
+          onToggleDocumentRead={vi.fn(async () => {})}
+          onReprocessDocument={vi.fn(async () => {})}
+        />
+      );
+    });
+
+    const firstCheckbox = container.querySelector('input[aria-label="Select sample.pdf"]') as HTMLInputElement | null;
+    const secondCheckbox = container.querySelector('input[aria-label="Select sample-2.pdf"]') as HTMLInputElement | null;
+    expect(firstCheckbox).not.toBeNull();
+    expect(secondCheckbox).not.toBeNull();
+
+    await act(async () => {
+      firstCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      secondCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('2 documents selected');
+
+    const moveSelectedButton = container.querySelector('button[aria-label="Move selected"]') as HTMLButtonElement | null;
+    expect(moveSelectedButton).not.toBeNull();
+
+    await act(async () => {
+      moveSelectedButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const archiveOption = container.querySelector('[data-testid="move-item-dialog"] input[type="radio"][value="folder-1"]') as HTMLInputElement | null;
+    expect(archiveOption).not.toBeNull();
+
+    await act(async () => {
+      archiveOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      archiveOption?.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    const confirmMoveButton = container.querySelector('[data-testid="move-item-dialog"] button[aria-label="Move documents"]') as HTMLButtonElement | null;
+    expect(confirmMoveButton).not.toBeNull();
+
+    await act(async () => {
+      confirmMoveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onMoveItem).toHaveBeenNthCalledWith(1, 'doc-1', 'folder-1');
+    expect(onMoveItem).toHaveBeenNthCalledWith(2, 'doc-2', 'folder-1');
+  });
+
+  it('deletes multiple selected documents together', async () => {
+    const onDeleteDocuments = vi.fn(async () => {});
+
+    await act(async () => {
+      root.render(
+        <Dashboard
+          items={[
+            buildDocument(),
+            buildDocument({ id: 'doc-2', name: 'sample-2.pdf' }),
+          ]}
+          models={DASHBOARD_MODELS}
+          currentFolderId={null}
+          onOpenDocument={vi.fn()}
+          onNewUpload={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onNavigateFolder={vi.fn()}
+          onDeleteItem={vi.fn()}
+          onDeleteDocuments={onDeleteDocuments}
+          onMoveItem={vi.fn(async () => {})}
+          onRenameDocument={vi.fn(async () => {})}
+          onToggleDocumentRead={vi.fn(async () => {})}
+          onReprocessDocument={vi.fn(async () => {})}
+        />
+      );
+    });
+
+    const firstCheckbox = container.querySelector('input[aria-label="Select sample.pdf"]') as HTMLInputElement | null;
+    const secondCheckbox = container.querySelector('input[aria-label="Select sample-2.pdf"]') as HTMLInputElement | null;
+
+    await act(async () => {
+      firstCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      secondCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const deleteSelectedButton = container.querySelector('button[aria-label="Delete selected"]') as HTMLButtonElement | null;
+    expect(deleteSelectedButton?.disabled).toBe(false);
+
+    await act(async () => {
+      deleteSelectedButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="bulk-delete-dialog"]')).not.toBeNull();
+
+    const confirmDeleteButton = container.querySelector('[data-testid="bulk-delete-dialog"] button[aria-label="Delete documents"]') as HTMLButtonElement | null;
+    expect(confirmDeleteButton).not.toBeNull();
+
+    await act(async () => {
+      confirmDeleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onDeleteDocuments).toHaveBeenCalledWith(['doc-1', 'doc-2']);
+  });
+
+  it('reprocesses multiple selected documents together', async () => {
+    const onReprocessDocument = vi.fn(async () => {});
+
+    await act(async () => {
+      root.render(
+        <Dashboard
+          items={[
+            buildDocument(),
+            buildDocument({ id: 'doc-2', name: 'sample-2.pdf', modelUsed: 'gemini-flash-lite-latest' }),
+          ]}
+          models={DASHBOARD_MODELS}
+          currentFolderId={null}
+          onOpenDocument={vi.fn()}
+          onNewUpload={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onNavigateFolder={vi.fn()}
+          onDeleteItem={vi.fn()}
+          onMoveItem={vi.fn(async () => {})}
+          onRenameDocument={vi.fn(async () => {})}
+          onToggleDocumentRead={vi.fn(async () => {})}
+          onReprocessDocument={onReprocessDocument}
+        />
+      );
+    });
+
+    const firstCheckbox = container.querySelector('input[aria-label="Select sample.pdf"]') as HTMLInputElement | null;
+    const secondCheckbox = container.querySelector('input[aria-label="Select sample-2.pdf"]') as HTMLInputElement | null;
+
+    await act(async () => {
+      firstCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      secondCheckbox?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const reprocessSelectedButton = container.querySelector('button[aria-label="Reprocess selected"]') as HTMLButtonElement | null;
+    expect(reprocessSelectedButton?.disabled).toBe(false);
+
+    await act(async () => {
+      reprocessSelectedButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain('Reprocess selected documents');
+    expect(container.textContent).toContain('Reprocess all 4 pages in 2 selected documents.');
+
+    const selects = Array.from(
+      container.querySelectorAll('[data-testid="reprocess-document-dialog"] select')
+    ) as HTMLSelectElement[];
+    const [, batchSizeSelect] = selects;
+    expect(batchSizeSelect).toBeDefined();
+
+    await act(async () => {
+      if (batchSizeSelect) {
+        const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+        valueSetter?.call(batchSizeSelect, '5');
+        batchSizeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    const confirmReprocessButton = container.querySelector('[data-testid="reprocess-document-dialog"] button[aria-label="Reprocess documents"]') as HTMLButtonElement | null;
+    expect(confirmReprocessButton).not.toBeNull();
+
+    await act(async () => {
+      confirmReprocessButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(onReprocessDocument).toHaveBeenNthCalledWith(1, 'doc-1', 'gemini-flash-lite-latest', 5, false);
+    expect(onReprocessDocument).toHaveBeenNthCalledWith(2, 'doc-2', 'gemini-flash-lite-latest', 5, false);
+  });
 });

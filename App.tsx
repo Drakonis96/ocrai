@@ -48,7 +48,7 @@ import {
   updateOcrSettings,
 } from './services/ocrSettingsService';
 import { reprocessDocument } from './services/geminiService';
-import { getPdfRenderConcurrency } from './utils/pdfProcessing';
+import { getPdfRenderConcurrency, getSafePdfViewportScale } from './utils/pdfProcessing';
 import { downloadBlob } from './utils/download';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
@@ -92,6 +92,12 @@ const reconcileItems = (currentItems: FileSystemItem[], nextItems: FileSystemIte
 
   return hasChanges ? reconciledItems : currentItems;
 };
+
+const collectDescendantItemIds = (sourceItems: FileSystemItem[], parentId: string): string[] => (
+  sourceItems
+    .filter((item) => item.parentId === parentId)
+    .flatMap((child) => [child.id, ...collectDescendantItemIds(sourceItems, child.id)])
+);
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>(AppView.DASHBOARD);
@@ -331,10 +337,7 @@ const App: React.FC = () => {
     });
   };
 
-  const convertPdfToImages = async (
-    file: File,
-    requestedConcurrency?: number
-  ): Promise<{ data: string; mimeType: string }[]> => {
+  const convertPdfToImages = async (file: File): Promise<{ data: string; mimeType: string }[]> => {
     if (!hasRealPdfWorkerSupport) {
       throw new Error('This browser does not support Web Workers. PDF processing requires a real worker.');
     }
@@ -342,40 +345,65 @@ const App: React.FC = () => {
     const arrayBuffer = await file.arrayBuffer();
     const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     const pdf = await loadingTask.promise;
-    const images: { data: string; mimeType: string }[] = new Array(pdf.numPages);
-    const renderConcurrency = Math.min(getPdfRenderConcurrency(requestedConcurrency), pdf.numPages);
 
-    const renderPage = async (pageNum: number) => {
-      const page = await pdf.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.5 });
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const context = canvas.getContext('2d');
-      if (!context) {
-        throw new Error(`Failed to create a canvas context for page ${pageNum}`);
-      }
+    try {
+      const images: { data: string; mimeType: string }[] = new Array(pdf.numPages);
+      const renderConcurrency = Math.min(getPdfRenderConcurrency(), pdf.numPages);
 
-      await page.render({ canvasContext: context, viewport } as any).promise;
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      images[pageNum - 1] = { data: dataUrl.split(',')[1], mimeType: 'image/jpeg' };
-    };
+      const renderPage = async (pageNum: number) => {
+        const page = await pdf.getPage(pageNum);
+        const canvas = document.createElement('canvas');
 
-    let nextPageNumber = 1;
-    await Promise.all(Array.from({ length: renderConcurrency }, async () => {
-      while (true) {
-        const pageNum = nextPageNumber;
-        nextPageNumber += 1;
+        try {
+          const baseViewport = page.getViewport({ scale: 1 });
+          const safeScale = getSafePdfViewportScale(baseViewport, 1.5);
+          const viewport = page.getViewport({ scale: safeScale });
 
-        if (pageNum > pdf.numPages) {
-          return;
+          canvas.width = Math.max(1, Math.ceil(viewport.width));
+          canvas.height = Math.max(1, Math.ceil(viewport.height));
+
+          const context = canvas.getContext('2d', { alpha: false });
+          if (!context) {
+            throw new Error(`Failed to create a canvas context for page ${pageNum}`);
+          }
+
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+
+          await page.render({ canvasContext: context, viewport, intent: 'display' } as any).promise;
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          if (!dataUrl.startsWith('data:image/jpeg;base64,')) {
+            throw new Error(`Failed to serialize PDF page ${pageNum}`);
+          }
+
+          images[pageNum - 1] = { data: dataUrl.split(',')[1], mimeType: 'image/jpeg' };
+        } finally {
+          page.cleanup();
+          canvas.width = 0;
+          canvas.height = 0;
+          canvas.remove();
         }
+      };
 
-        await renderPage(pageNum);
-      }
-    }));
+      let nextPageNumber = 1;
+      await Promise.all(Array.from({ length: renderConcurrency }, async () => {
+        while (true) {
+          const pageNum = nextPageNumber;
+          nextPageNumber += 1;
 
-    return images;
+          if (pageNum > pdf.numPages) {
+            return;
+          }
+
+          await renderPage(pageNum);
+        }
+      }));
+
+      return images;
+    } finally {
+      pdf.cleanup();
+    }
   };
 
   const handleCreateFolder = useCallback(async (name: string) => {
@@ -395,30 +423,35 @@ const App: React.FC = () => {
     setItemToDelete(itemId);
   }, []);
 
+  const deleteItemsByIds = useCallback(async (requestedIds: string[]) => {
+    const currentItems = itemsRef.current;
+    const idsToDelete = Array.from(new Set(
+      requestedIds.flatMap((itemId) => [itemId, ...collectDescendantItemIds(currentItems, itemId)])
+    ));
+
+    if (idsToDelete.length === 0) {
+      return;
+    }
+
+    for (const id of idsToDelete) {
+      await deleteItem(id);
+    }
+
+    setItems((current) => current.filter((item) => !idsToDelete.includes(item.id)));
+
+    if (activeDocId && idsToDelete.includes(activeDocId)) {
+      setCurrentView(AppView.DASHBOARD);
+      setActiveDocId(null);
+    }
+  }, [activeDocId]);
+
   const executeDeleteItem = async () => {
     if (!itemToDelete) {
       return;
     }
 
-    const getChildrenIds = (parentId: string): string[] => {
-      return items
-        .filter((item) => item.parentId === parentId)
-        .flatMap((child) => [child.id, ...getChildrenIds(child.id)]);
-    };
-
-    const idsToDelete = [itemToDelete, ...getChildrenIds(itemToDelete)];
-
     try {
-      for (const id of idsToDelete) {
-        await deleteItem(id);
-      }
-
-      setItems((current) => current.filter((item) => !idsToDelete.includes(item.id)));
-
-      if (activeDocId && idsToDelete.includes(activeDocId)) {
-        setCurrentView(AppView.DASHBOARD);
-        setActiveDocId(null);
-      }
+      await deleteItemsByIds([itemToDelete]);
     } catch (error) {
       console.error('Failed to delete items', error);
       alert('An error occurred while deleting. Please try again.');
@@ -427,6 +460,21 @@ const App: React.FC = () => {
       setItemToDelete(null);
     }
   };
+
+  const handleDeleteDocuments = useCallback(async (docIds: string[]) => {
+    const normalizedDocIds = Array.from(new Set(docIds.filter(Boolean)));
+    if (normalizedDocIds.length === 0) {
+      return;
+    }
+
+    try {
+      await deleteItemsByIds(normalizedDocIds);
+    } catch (error) {
+      console.error('Failed to delete selected documents', error);
+      await loadItems();
+      throw error;
+    }
+  }, [deleteItemsByIds, loadItems]);
 
   const handleMoveItem = useCallback(async (itemId: string, targetFolderId: string | null) => {
     if (itemId === targetFolderId) {
@@ -562,9 +610,9 @@ const App: React.FC = () => {
 
       for (const file of files) {
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const isPdf = file.type === 'application/pdf';
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
         const images = isPdf
-          ? await convertPdfToImages(file, options.pagesPerBatch)
+          ? await convertPdfToImages(file)
           : [{ data: await fileToBase64(file), mimeType: file.type }];
 
         const newDoc: DocumentData = {
@@ -810,6 +858,7 @@ const App: React.FC = () => {
                 onCreateFolder={handleCreateFolder}
                 onNavigateFolder={setCurrentFolderId}
                 onDeleteItem={handleRequestDelete}
+                onDeleteDocuments={handleDeleteDocuments}
                 onMoveItem={handleMoveItem}
                 onRenameDocument={handleRenameDocument}
                 onToggleDocumentRead={handleToggleDocumentRead}

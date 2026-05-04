@@ -36,6 +36,7 @@ interface DashboardProps {
   onCreateFolder: (name: string) => void;
   onNavigateFolder: (folderId: string | null) => void;
   onDeleteItem: (itemId: string) => void;
+  onDeleteDocuments?: (docIds: string[]) => Promise<void>;
   onMoveItem: (itemId: string, targetFolderId: string | null) => Promise<void>;
   onRenameDocument: (docId: string, nextName: string) => Promise<void>;
   onToggleDocumentRead: (docId: string, isRead: boolean) => Promise<void>;
@@ -56,6 +57,7 @@ const EMPTY_LABELS: string[] = [];
 const FOLDER_FILTER_CURRENT = '__current__';
 const FOLDER_FILTER_ALL = '__all__';
 const FOLDER_FILTER_ROOT = '__root__';
+const MULTIPLE_CURRENT_DESTINATION_ID = '__multiple__';
 
 const STATUS_ORDER: Record<DocumentData['status'], number> = {
   uploading: 0,
@@ -139,6 +141,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   onCreateFolder,
   onNavigateFolder,
   onDeleteItem,
+  onDeleteDocuments,
   onMoveItem,
   onRenameDocument,
   onToggleDocumentRead,
@@ -166,21 +169,36 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const [pendingReadDocumentIds, setPendingReadDocumentIds] = useState<string[]>([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [bulkDeleteError, setBulkDeleteError] = useState('');
+  const [isDeletingSelectedDocuments, setIsDeletingSelectedDocuments] = useState(false);
   const [moveItemId, setMoveItemId] = useState<string | null>(null);
   const [moveTargetFolderId, setMoveTargetFolderId] = useState<string | null>(null);
   const [moveError, setMoveError] = useState('');
   const [isMovingItem, setIsMovingItem] = useState(false);
+  const [isBulkMoveDialogOpen, setIsBulkMoveDialogOpen] = useState(false);
+  const [bulkMoveTargetFolderId, setBulkMoveTargetFolderId] = useState<string | null>(null);
+  const [bulkMoveError, setBulkMoveError] = useState('');
+  const [isBulkMovingDocuments, setIsBulkMovingDocuments] = useState(false);
   const [reprocessDocumentId, setReprocessDocumentId] = useState<string | null>(null);
   const [reprocessModelId, setReprocessModelId] = useState(getPreferredDefaultModelId(models));
   const [reprocessPagesPerBatch, setReprocessPagesPerBatch] = useState(1);
   const [reprocessSplitColumns, setReprocessSplitColumns] = useState(false);
   const [reprocessError, setReprocessError] = useState('');
   const [isReprocessingDocument, setIsReprocessingDocument] = useState(false);
+  const [isBulkReprocessDialogOpen, setIsBulkReprocessDialogOpen] = useState(false);
+  const [bulkReprocessModelId, setBulkReprocessModelId] = useState(getPreferredDefaultModelId(models));
+  const [bulkReprocessPagesPerBatch, setBulkReprocessPagesPerBatch] = useState(1);
+  const [bulkReprocessSplitColumns, setBulkReprocessSplitColumns] = useState(false);
+  const [bulkReprocessError, setBulkReprocessError] = useState('');
+  const [isBulkReprocessingDocuments, setIsBulkReprocessingDocuments] = useState(false);
   const [labelDocumentId, setLabelDocumentId] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState<string[]>([]);
   const [labelError, setLabelError] = useState('');
   const [isSavingLabels, setIsSavingLabels] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const selectAllVisibleCheckboxRef = useRef<HTMLInputElement | null>(null);
 
   const compareText = (left: string, right: string) =>
     left.localeCompare(right, undefined, { sensitivity: 'base', numeric: true });
@@ -188,6 +206,8 @@ const Dashboard: React.FC<DashboardProps> = ({
   const allFolders = items.filter((item): item is FolderData => item.type === 'folder');
   const foldersById = new Map(allFolders.map((folder) => [folder.id, folder]));
   const allDocuments = items.filter((item): item is DocumentData => item.type === 'file');
+  const selectedDocumentIdSet = new Set(selectedDocumentIds);
+  const selectedDocuments = allDocuments.filter((doc) => selectedDocumentIdSet.has(doc.id));
   const availableFilterLabels = Array.from(new Set(
     [...availableLabels, ...allDocuments.flatMap((doc) => doc.labels ?? [])]
       .map((label) => label.trim())
@@ -338,6 +358,9 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     return nameMatches || getDocumentSearchText(doc).toLocaleLowerCase().includes(normalizedSearchQuery);
   });
+  const filteredVisibleDocumentIds = filteredVisibleItems
+    .filter((item): item is DocumentData => item.type === 'file')
+    .map((doc) => doc.id);
 
   const sortedVisibleItems = [...filteredVisibleItems].sort((left, right) => {
     let comparison = 0;
@@ -369,9 +392,18 @@ const Dashboard: React.FC<DashboardProps> = ({
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * documentsPerPage;
   const paginatedVisibleItems = sortedVisibleItems.slice(startIndex, startIndex + documentsPerPage);
+  const paginatedVisibleDocumentIds = paginatedVisibleItems
+    .filter((item): item is DocumentData => item.type === 'file')
+    .map((doc) => doc.id);
   const visibleRangeStart = totalResults === 0 ? 0 : startIndex + 1;
   const visibleRangeEnd = totalResults === 0 ? 0 : Math.min(totalResults, startIndex + documentsPerPage);
   const paginationTokens = getPaginationTokens(safeCurrentPage, totalPages);
+  const allVisibleDocumentsSelected = paginatedVisibleDocumentIds.length > 0
+    && paginatedVisibleDocumentIds.every((docId) => selectedDocumentIdSet.has(docId));
+  const someVisibleDocumentsSelected = paginatedVisibleDocumentIds.some((docId) => selectedDocumentIdSet.has(docId));
+  const selectedDocumentsLabel = `${selectedDocuments.length} document${selectedDocuments.length === 1 ? '' : 's'} selected`;
+  const selectedDocumentsPageCount = selectedDocuments.reduce((total, doc) => total + doc.pages.length, 0);
+  const canBulkReprocessSelectedDocuments = selectedDocuments.length > 0 && selectedDocuments.every(canReprocessDocument);
 
   const getBreadcrumbs = () => {
     const path = [];
@@ -396,6 +428,11 @@ const Dashboard: React.FC<DashboardProps> = ({
   const labelDocumentItem = labelDocumentId
     ? (items.find((item) => item.type === 'file' && item.id === labelDocumentId) as DocumentData | undefined) ?? null
     : null;
+  const bulkMoveCurrentDestinationId = selectedDocuments.length <= 1
+    ? (selectedDocuments[0]?.parentId ?? null)
+    : selectedDocuments.some((doc) => doc.parentId !== selectedDocuments[0].parentId)
+      ? MULTIPLE_CURRENT_DESTINATION_ID
+      : (selectedDocuments[0]?.parentId ?? null);
 
   const isFolderWithinMovedTree = (folderId: string, movedFolderId: string) => {
     let currentId: string | null = folderId;
@@ -516,6 +553,73 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   }, [onToggleDocumentRead, reportActionError]);
 
+  const handleToggleDocumentSelection = useCallback((docId: string, isSelected: boolean) => {
+    setSelectedDocumentIds((currentIds) => {
+      if (isSelected) {
+        return currentIds.includes(docId) ? currentIds : [...currentIds, docId];
+      }
+
+      return currentIds.filter((currentId) => currentId !== docId);
+    });
+  }, []);
+
+  const handleToggleSelectAllVisibleDocuments = useCallback((isSelected: boolean) => {
+    setSelectedDocumentIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+
+      paginatedVisibleDocumentIds.forEach((docId) => {
+        if (isSelected) {
+          nextIds.add(docId);
+        } else {
+          nextIds.delete(docId);
+        }
+      });
+
+      return Array.from(nextIds);
+    });
+  }, [paginatedVisibleDocumentIds]);
+
+  const handleClearSelectedDocuments = useCallback(() => {
+    setSelectedDocumentIds([]);
+  }, []);
+
+  const handleOpenBulkDeleteDialog = useCallback(() => {
+    if (selectedDocuments.length === 0 || !onDeleteDocuments) {
+      return;
+    }
+
+    setBulkDeleteError('');
+    setIsBulkDeleteDialogOpen(true);
+  }, [onDeleteDocuments, selectedDocuments.length]);
+
+  const handleCloseBulkDeleteDialog = useCallback(() => {
+    if (isDeletingSelectedDocuments) {
+      return;
+    }
+
+    setIsBulkDeleteDialogOpen(false);
+    setBulkDeleteError('');
+  }, [isDeletingSelectedDocuments]);
+
+  const handleSubmitBulkDeleteDocuments = useCallback(async () => {
+    if (!onDeleteDocuments || selectedDocumentIds.length === 0) {
+      return;
+    }
+
+    setIsDeletingSelectedDocuments(true);
+
+    try {
+      await onDeleteDocuments(selectedDocumentIds);
+      setSelectedDocumentIds([]);
+      setIsBulkDeleteDialogOpen(false);
+      setBulkDeleteError('');
+    } catch (error: any) {
+      setBulkDeleteError(error.message || 'Failed to delete selected documents.');
+    } finally {
+      setIsDeletingSelectedDocuments(false);
+    }
+  }, [onDeleteDocuments, selectedDocumentIds]);
+
   const handleOpenLabelsDialog = useCallback((event: React.MouseEvent, doc: DocumentData) => {
     event.stopPropagation();
     setLabelDocumentId(doc.id);
@@ -607,6 +711,59 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   }, [moveItem, moveTargetFolderId, onMoveItem]);
 
+  const handleOpenBulkMoveDialog = useCallback(() => {
+    if (selectedDocuments.length === 0) {
+      return;
+    }
+
+    setBulkMoveTargetFolderId(bulkMoveCurrentDestinationId === MULTIPLE_CURRENT_DESTINATION_ID
+      ? currentFolderId
+      : bulkMoveCurrentDestinationId);
+    setBulkMoveError('');
+    setIsBulkMoveDialogOpen(true);
+  }, [bulkMoveCurrentDestinationId, currentFolderId, selectedDocuments.length]);
+
+  const handleCloseBulkMoveDialog = useCallback(() => {
+    if (isBulkMovingDocuments) {
+      return;
+    }
+
+    setIsBulkMoveDialogOpen(false);
+    setBulkMoveError('');
+  }, [isBulkMovingDocuments]);
+
+  const handleSubmitBulkMoveDocuments = useCallback(async () => {
+    if (selectedDocumentIds.length === 0) {
+      return;
+    }
+
+    setIsBulkMovingDocuments(true);
+
+    try {
+      const moveResults = await Promise.allSettled(
+        selectedDocumentIds.map((docId) => onMoveItem(docId, bulkMoveTargetFolderId))
+      );
+      const failedMoves = moveResults.filter((result) => result.status === 'rejected');
+
+      if (failedMoves.length > 0) {
+        const firstError = failedMoves[0].status === 'rejected' ? failedMoves[0].reason : null;
+        throw new Error(
+          failedMoves.length === 1
+            ? (firstError instanceof Error ? firstError.message : 'Failed to move a selected document.')
+            : `${failedMoves.length} of ${selectedDocumentIds.length} selected documents could not be moved.`
+        );
+      }
+
+      setSelectedDocumentIds([]);
+      setIsBulkMoveDialogOpen(false);
+      setBulkMoveError('');
+    } catch (error: any) {
+      setBulkMoveError(error.message || 'Failed to move selected documents.');
+    } finally {
+      setIsBulkMovingDocuments(false);
+    }
+  }, [bulkMoveTargetFolderId, onMoveItem, selectedDocumentIds]);
+
   const handleOpenReprocessDialog = useCallback((event: React.MouseEvent, doc: DocumentData) => {
     event.stopPropagation();
     setReprocessDocumentId(doc.id);
@@ -642,6 +799,66 @@ const Dashboard: React.FC<DashboardProps> = ({
       setIsReprocessingDocument(false);
     }
   }, [onReprocessDocument, reprocessDocumentItem, reprocessModelId, reprocessPagesPerBatch, reprocessSplitColumns]);
+
+  const handleOpenBulkReprocessDialog = useCallback(() => {
+    if (selectedDocuments.length === 0) {
+      return;
+    }
+
+    const firstDocument = selectedDocuments[0];
+    const selectedBatchSizes = Array.from(new Set(
+      selectedDocuments.map((doc) => (
+        Number.isInteger(doc.pagesPerBatch) && (doc.pagesPerBatch ?? 0) > 0 ? doc.pagesPerBatch ?? 1 : 1
+      ))
+    ));
+
+    setBulkReprocessModelId(getPreferredDefaultModelId(models) || firstDocument?.modelUsed || DEFAULT_MODEL_ID);
+    setBulkReprocessPagesPerBatch(selectedBatchSizes.length === 1 ? selectedBatchSizes[0] : 1);
+    setBulkReprocessSplitColumns(selectedDocuments.every((doc) => doc.splitColumns === true));
+    setBulkReprocessError('');
+    setIsBulkReprocessDialogOpen(true);
+  }, [models, selectedDocuments]);
+
+  const handleCloseBulkReprocessDialog = useCallback(() => {
+    if (isBulkReprocessingDocuments) {
+      return;
+    }
+
+    setIsBulkReprocessDialogOpen(false);
+    setBulkReprocessError('');
+  }, [isBulkReprocessingDocuments]);
+
+  const handleSubmitBulkReprocessDocuments = useCallback(async () => {
+    if (selectedDocuments.length === 0 || !bulkReprocessModelId) {
+      return;
+    }
+
+    setIsBulkReprocessingDocuments(true);
+
+    try {
+      const reprocessResults = await Promise.allSettled(
+        selectedDocuments.map((doc) => onReprocessDocument(doc.id, bulkReprocessModelId, bulkReprocessPagesPerBatch, bulkReprocessSplitColumns))
+      );
+      const failedReprocesses = reprocessResults.filter((result) => result.status === 'rejected');
+
+      if (failedReprocesses.length > 0) {
+        const firstError = failedReprocesses[0].status === 'rejected' ? failedReprocesses[0].reason : null;
+        throw new Error(
+          failedReprocesses.length === 1
+            ? (firstError instanceof Error ? firstError.message : 'Failed to reprocess a selected document.')
+            : `${failedReprocesses.length} of ${selectedDocuments.length} selected documents could not be reprocessed.`
+        );
+      }
+
+      setSelectedDocumentIds([]);
+      setIsBulkReprocessDialogOpen(false);
+      setBulkReprocessError('');
+    } catch (error: any) {
+      setBulkReprocessError(error.message || 'Failed to reprocess selected documents.');
+    } finally {
+      setIsBulkReprocessingDocuments(false);
+    }
+  }, [bulkReprocessModelId, bulkReprocessPagesPerBatch, bulkReprocessSplitColumns, onReprocessDocument, selectedDocuments]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -728,8 +945,26 @@ const Dashboard: React.FC<DashboardProps> = ({
   }, [totalPages]);
 
   useEffect(() => {
+    const visibleDocumentIdSet = new Set(filteredVisibleDocumentIds);
+    setSelectedDocumentIds((currentIds) => {
+      const nextIds = currentIds.filter((docId) => visibleDocumentIdSet.has(docId));
+      return nextIds.length === currentIds.length ? currentIds : nextIds;
+    });
+  }, [
+    filteredVisibleDocumentIds,
+  ]);
+
+  useEffect(() => {
     setLabelDraft((currentLabels) => currentLabels.filter((label) => availableLabels.includes(label)));
   }, [availableLabels]);
+
+  useEffect(() => {
+    if (!selectAllVisibleCheckboxRef.current) {
+      return;
+    }
+
+    selectAllVisibleCheckboxRef.current.indeterminate = someVisibleDocumentsSelected && !allVisibleDocumentsSelected;
+  }, [allVisibleDocumentsSelected, someVisibleDocumentsSelected]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -992,6 +1227,52 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         )}
 
+        {selectedDocuments.length > 0 && (
+          <div
+            data-testid="dashboard-selection-toolbar"
+            className="mb-6 flex flex-col gap-3 rounded-3xl border border-blue-200 bg-blue-50/80 p-4 shadow-sm transition-colors dark:border-blue-900/50 dark:bg-blue-950/20 lg:flex-row lg:items-center lg:justify-between"
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                {selectedDocumentsLabel}
+              </p>
+              <p className="text-sm text-blue-700/80 dark:text-blue-200/80">
+                Bulk actions apply to all selected documents.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <IconActionButton
+                icon={<MoveIcon className="h-4 w-4" />}
+                label="Move selected"
+                isActive
+                onClick={handleOpenBulkMoveDialog}
+              />
+              <IconActionButton
+                icon={<RefreshCwIcon className="h-4 w-4" />}
+                label="Reprocess selected"
+                isActive
+                disabled={!canBulkReprocessSelectedDocuments}
+                onClick={handleOpenBulkReprocessDialog}
+              />
+              <IconActionButton
+                icon={<TrashIcon className="h-4 w-4" />}
+                label="Delete selected"
+                isActive
+                variant="danger"
+                disabled={!onDeleteDocuments}
+                onClick={handleOpenBulkDeleteDialog}
+              />
+              <IconActionButton
+                icon={<CloseIcon className="h-4 w-4" />}
+                label="Clear selection"
+                isActive
+                onClick={handleClearSelectedDocuments}
+              />
+            </div>
+          </div>
+        )}
+
         {isCreatingFolder && (
           <div className="mb-6 flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800 sm:flex-row sm:items-center">
             <div className="rounded-2xl bg-blue-50 p-3 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400">
@@ -1057,6 +1338,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             <div className="hidden overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800 md:block">
               <table className="w-full table-fixed text-left">
                 <colgroup>
+                  <col className="w-[4rem]" />
                   <col />
                   <col className="w-[6rem] lg:w-[7rem]" />
                   <col className="w-[8.5rem] lg:w-[10rem]" />
@@ -1065,6 +1347,17 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </colgroup>
                 <thead className="border-b border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50">
                   <tr>
+                    <th className="px-4 py-4 text-center text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      <input
+                        ref={selectAllVisibleCheckboxRef}
+                        type="checkbox"
+                        aria-label="Select all visible documents"
+                        checked={allVisibleDocumentsSelected}
+                        disabled={paginatedVisibleDocumentIds.length === 0}
+                        onChange={(event) => handleToggleSelectAllVisibleDocuments(event.target.checked)}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-700"
+                      />
+                    </th>
                     <th className="px-6 py-4 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
                       <button
                         type="button"
@@ -1108,6 +1401,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <DesktopRow
                       key={item.id}
                       item={item}
+                      isSelected={selectedDocumentIdSet.has(item.id)}
                       isCopyFeedbackVisible={copyFeedbackId === item.id}
                       onCopyTitle={handleCopyTitle}
                       onDeleteItem={onDeleteItem}
@@ -1117,6 +1411,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       onOpenDocument={onOpenDocument}
                       onStartRenameDocument={handleOpenRenameDialog}
                       onStartMoveItem={handleOpenMoveDialog}
+                      onToggleDocumentSelection={handleToggleDocumentSelection}
                       onToggleDocumentRead={handleToggleRead}
                       onStartEditDocumentLabels={handleOpenLabelsDialog}
                       onStartReprocessDocument={handleOpenReprocessDialog}
@@ -1133,6 +1428,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <MobileCard
                   key={item.id}
                   item={item}
+                  isSelected={selectedDocumentIdSet.has(item.id)}
                   isCopyFeedbackVisible={copyFeedbackId === item.id}
                   onCopyTitle={handleCopyTitle}
                   onDeleteItem={onDeleteItem}
@@ -1142,6 +1438,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                   onOpenDocument={onOpenDocument}
                   onStartRenameDocument={handleOpenRenameDialog}
                   onStartMoveItem={handleOpenMoveDialog}
+                  onToggleDocumentSelection={handleToggleDocumentSelection}
                   onToggleDocumentRead={handleToggleRead}
                   onStartEditDocumentLabels={handleOpenLabelsDialog}
                   onStartReprocessDocument={handleOpenReprocessDialog}
@@ -1249,6 +1546,22 @@ const Dashboard: React.FC<DashboardProps> = ({
           onClose={handleCloseMoveDialog}
           onSubmit={handleSubmitMoveItem}
         />
+        <MoveItemDialog
+          isOpen={isBulkMoveDialogOpen}
+          itemName={selectedDocuments.length === 1 ? selectedDocuments[0]?.name ?? '' : `${selectedDocuments.length} selected documents`}
+          itemType="file"
+          title="Move selected documents"
+          submitLabel="Move documents"
+          submitSavingLabel="Moving documents"
+          destinations={moveDestinationOptions}
+          selectedDestinationId={bulkMoveTargetFolderId}
+          currentDestinationId={bulkMoveCurrentDestinationId}
+          error={bulkMoveError}
+          isSaving={isBulkMovingDocuments}
+          onChange={setBulkMoveTargetFolderId}
+          onClose={handleCloseBulkMoveDialog}
+          onSubmit={handleSubmitBulkMoveDocuments}
+        />
         <ReprocessDocumentDialog
           isOpen={reprocessDocumentItem !== null}
           documentName={reprocessDocumentItem?.name ?? ''}
@@ -1265,6 +1578,25 @@ const Dashboard: React.FC<DashboardProps> = ({
       onClose={handleCloseReprocessDialog}
       onSubmit={handleSubmitReprocessDocument}
     />
+        <ReprocessDocumentDialog
+          isOpen={isBulkReprocessDialogOpen}
+          documentName={selectedDocuments.length === 1 ? selectedDocuments[0]?.name ?? '' : `${selectedDocuments.length} selected documents`}
+          pageCount={selectedDocumentsPageCount}
+          models={models}
+          title="Reprocess selected documents"
+          submitLabel="Reprocess documents"
+          submitBusyLabel="Reprocessing documents"
+          selectedModelId={bulkReprocessModelId}
+          selectedPagesPerBatch={bulkReprocessPagesPerBatch}
+          selectedSplitColumns={bulkReprocessSplitColumns}
+          error={bulkReprocessError}
+          isSubmitting={isBulkReprocessingDocuments}
+          onChangeModel={setBulkReprocessModelId}
+          onChangePagesPerBatch={setBulkReprocessPagesPerBatch}
+          onChangeSplitColumns={setBulkReprocessSplitColumns}
+          onClose={handleCloseBulkReprocessDialog}
+          onSubmit={handleSubmitBulkReprocessDocuments}
+        />
         <DocumentLabelsDialog
           isOpen={labelDocumentItem !== null}
           documentName={labelDocumentItem?.name ?? ''}
@@ -1277,6 +1609,50 @@ const Dashboard: React.FC<DashboardProps> = ({
           onSubmit={handleSubmitDocumentLabels}
           onOpenLabelingSettings={handleOpenLabelingSettings}
         />
+        {isBulkDeleteDialogOpen && (
+          <div
+            data-testid="bulk-delete-dialog"
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          >
+            <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-700 dark:bg-slate-800">
+              <div className="mb-4 flex items-center gap-3 text-red-600 dark:text-red-400">
+                <div className="rounded-full bg-red-100 p-2 dark:bg-red-900/30">
+                  <TrashIcon className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 dark:text-white">Delete selected documents</h2>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Permanently remove {selectedDocuments.length} document{selectedDocuments.length === 1 ? '' : 's'} from the workspace.
+                  </p>
+                </div>
+              </div>
+
+              <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
+                This will delete the selected documents and their processed files. This action cannot be undone.
+              </p>
+
+              {bulkDeleteError && (
+                <p className="mt-3 text-sm text-red-600 dark:text-red-400">{bulkDeleteError}</p>
+              )}
+
+              <div className="mt-6 flex flex-wrap justify-end gap-2">
+                <IconActionButton
+                  icon={<CloseIcon className="h-4 w-4" />}
+                  label="Cancel"
+                  onClick={handleCloseBulkDeleteDialog}
+                />
+                <IconActionButton
+                  icon={<TrashIcon className="h-4 w-4" />}
+                  label={isDeletingSelectedDocuments ? 'Deleting documents' : 'Delete documents'}
+                  isActive
+                  variant="danger"
+                  disabled={isDeletingSelectedDocuments}
+                  onClick={handleSubmitBulkDeleteDocuments}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {showScrollToTop && (
@@ -1296,6 +1672,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
 interface SharedItemProps {
   item: FileSystemItem;
+  isSelected: boolean;
   isCopyFeedbackVisible: boolean;
   isReadPending: boolean;
   onCopyTitle: (event: React.MouseEvent, id: string, name: string) => void;
@@ -1306,11 +1683,35 @@ interface SharedItemProps {
   onOpenDocument: (docId: string) => void;
   onStartRenameDocument: (event: React.MouseEvent, doc: DocumentData) => void;
   onStartMoveItem: (event: React.MouseEvent, item: FileSystemItem) => void;
+  onToggleDocumentSelection: (docId: string, isSelected: boolean) => void;
   onToggleDocumentRead: (docId: string, isRead: boolean) => void;
   onStartEditDocumentLabels?: (event: React.MouseEvent, doc: DocumentData) => void;
   onStartReprocessDocument: (event: React.MouseEvent, doc: DocumentData) => void;
   handleDragOver: (event: React.DragEvent) => void;
 }
+
+const DocumentSelectionCheckbox = ({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) => (
+  <label
+    className="inline-flex items-center justify-center"
+    onClick={(event) => event.stopPropagation()}
+  >
+    <input
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      onChange={(event) => onChange(event.target.checked)}
+      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700"
+    />
+  </label>
+);
 
 const DocumentReadCheckbox = ({
   doc,
@@ -1385,6 +1786,7 @@ const DocumentLabelsStrip = ({
 
 const DesktopRow: React.FC<SharedItemProps> = memo(({
   item,
+  isSelected,
   isCopyFeedbackVisible,
   isReadPending,
   onCopyTitle,
@@ -1395,6 +1797,7 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
   onOpenDocument,
   onStartRenameDocument,
   onStartMoveItem,
+  onToggleDocumentSelection,
   onToggleDocumentRead,
   onStartEditDocumentLabels,
   onStartReprocessDocument,
@@ -1412,6 +1815,7 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
         className="group cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
         onClick={() => onNavigateFolder(folder.id)}
       >
+        <td className="px-4 py-4 text-center text-sm text-slate-400 dark:text-slate-500">-</td>
         <td className="px-6 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="rounded-2xl bg-blue-50 p-2 text-blue-500 dark:bg-blue-900/30 dark:text-blue-400">
@@ -1457,8 +1861,15 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
     <tr
       draggable
       onDragStart={(event) => onDragStart(event, doc.id)}
-      className="group transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/50"
+      className={`group transition-colors ${isSelected ? 'bg-blue-50/70 dark:bg-blue-900/10' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
     >
+      <td className="px-4 py-4 text-center">
+        <DocumentSelectionCheckbox
+          label={`Select ${doc.name}`}
+          checked={isSelected}
+          onChange={(checked) => onToggleDocumentSelection(doc.id, checked)}
+        />
+      </td>
       <td className="px-6 py-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="rounded-2xl bg-slate-100 p-2 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
@@ -1555,12 +1966,14 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
   );
 }, (previousProps, nextProps) => (
   previousProps.item === nextProps.item
+  && previousProps.isSelected === nextProps.isSelected
   && previousProps.isCopyFeedbackVisible === nextProps.isCopyFeedbackVisible
   && previousProps.isReadPending === nextProps.isReadPending
 ));
 
 const MobileCard: React.FC<SharedItemProps> = memo(({
   item,
+  isSelected,
   isCopyFeedbackVisible,
   isReadPending,
   onCopyTitle,
@@ -1571,6 +1984,7 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
   onOpenDocument,
   onStartRenameDocument,
   onStartMoveItem,
+  onToggleDocumentSelection,
   onToggleDocumentRead,
   onStartEditDocumentLabels,
   onStartReprocessDocument,
@@ -1636,11 +2050,16 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
       draggable
       onDragStart={(event) => onDragStart(event, doc.id)}
       data-testid={`mobile-card-${doc.id}`}
-      className="w-full min-w-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition-colors dark:border-slate-700 dark:bg-slate-800"
+      className={`w-full min-w-0 overflow-hidden rounded-3xl border bg-white p-4 shadow-sm transition-colors dark:bg-slate-800 ${isSelected ? 'border-blue-300 ring-1 ring-blue-200 dark:border-blue-700 dark:ring-blue-900/60' : 'border-slate-200 dark:border-slate-700'}`}
     >
       <div className="min-w-0">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-start gap-3">
+            <DocumentSelectionCheckbox
+              label={`Select ${doc.name}`}
+              checked={isSelected}
+              onChange={(checked) => onToggleDocumentSelection(doc.id, checked)}
+            />
             <div className="rounded-2xl bg-slate-100 p-3 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
               <FileIcon className="h-5 w-5" />
             </div>
@@ -1730,6 +2149,7 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
   );
 }, (previousProps, nextProps) => (
   previousProps.item === nextProps.item
+  && previousProps.isSelected === nextProps.isSelected
   && previousProps.isCopyFeedbackVisible === nextProps.isCopyFeedbackVisible
   && previousProps.isReadPending === nextProps.isReadPending
 ));

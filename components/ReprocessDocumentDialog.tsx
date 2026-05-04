@@ -10,6 +10,9 @@ interface ReprocessDocumentDialogProps {
   documentName: string;
   pageCount: number;
   models: GeminiModel[];
+  title?: string;
+  submitLabel?: string;
+  submitBusyLabel?: string;
   selectedModelId: string;
   selectedPagesPerBatch: number;
   selectedSplitColumns: boolean;
@@ -27,6 +30,9 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
   documentName,
   pageCount,
   models,
+  title,
+  submitLabel,
+  submitBusyLabel,
   selectedModelId,
   selectedPagesPerBatch,
   selectedSplitColumns,
@@ -66,7 +72,7 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
             <RefreshCwIcon className="h-6 w-6" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Reprocess document</h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{title ?? 'Reprocess document'}</h2>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               Reprocess all {pageCount} page{pageCount === 1 ? '' : 's'} in <span className="font-medium text-slate-700 dark:text-slate-200">{documentName}</span>.
             </p>
@@ -165,7 +171,7 @@ const ReprocessDocumentDialog: React.FC<ReprocessDocumentDialogProps> = ({
           />
           <IconActionButton
             icon={<RefreshCwIcon className={`h-4 w-4 ${isSubmitting ? 'animate-spin' : ''}`} />}
-            label={isSubmitting ? 'Reprocessing document' : 'Reprocess document'}
+            label={isSubmitting ? (submitBusyLabel ?? 'Reprocessing document') : (submitLabel ?? 'Reprocess document')}
             isActive
             variant="primary"
             disabled={isSubmitting || models.length === 0}
