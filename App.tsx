@@ -8,6 +8,8 @@ import IconActionButton from './components/IconActionButton';
 import {
   ArchiveIcon,
   AlertCircleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CloseIcon,
   HomeIcon,
   LoaderIcon,
@@ -239,6 +241,7 @@ const App: React.FC = () => {
   const [activeDocId, setActiveDocId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadSessionDocs, setUploadSessionDocs] = useState<DocumentData[]>([]);
+  const [isOverlayMinimized, setIsOverlayMinimized] = useState(false);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -714,6 +717,7 @@ const App: React.FC = () => {
   ) => {
     const files = Array.from(fileList);
     setIsUploading(true);
+    setIsOverlayMinimized(false);
     setUploadSessionDocs([]);
 
     try {
@@ -1082,70 +1086,84 @@ const App: React.FC = () => {
             ? 'fixed inset-0 z-50 flex items-center justify-center bg-white/80 p-4 backdrop-blur-sm dark:bg-slate-900/80'
             : 'pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 sm:justify-end sm:px-6'}
         >
-          <div className={`pointer-events-auto w-full rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-800/95 ${isUploading ? 'max-w-3xl' : 'max-w-2xl sm:max-w-lg'}`}>
-            <div className="mb-6 flex items-start gap-4">
+          <div className={`pointer-events-auto w-full rounded-3xl border border-slate-200 bg-white/95 shadow-2xl dark:border-slate-700 dark:bg-slate-800/95 ${isUploading ? 'max-w-3xl p-6' : 'max-w-2xl sm:max-w-lg'}`}>
+            <div className={`flex items-start gap-4 ${isUploading ? 'mb-6' : (!isOverlayMinimized ? 'p-6 pb-0' : 'p-4')}`}>
               <div className="rounded-2xl bg-blue-100 p-3 dark:bg-blue-500/10">
                 <LoaderIcon className={`h-8 w-8 text-blue-600 dark:text-blue-400 ${hasActiveUploadSessionDocs || isUploading ? 'animate-spin' : ''}`} />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <h2 className="text-xl font-bold text-slate-800 dark:text-white">
                   {uploadSessionDocuments.length === 1 ? 'Processing document...' : 'Processing documents...'}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{uploadOverlaySummary}</p>
               </div>
+              {!isUploading && (
+                <button
+                  type="button"
+                  onClick={() => setIsOverlayMinimized((v) => !v)}
+                  className="shrink-0 rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-300"
+                  title={isOverlayMinimized ? 'Expandir' : 'Minimizar'}
+                >
+                  {isOverlayMinimized ? <ChevronUpIcon className="h-5 w-5" /> : <ChevronDownIcon className="h-5 w-5" />}
+                </button>
+              )}
             </div>
 
-            {uploadSessionDocuments.length > 0 ? (
-              <div className={`space-y-3 overflow-y-auto pr-1 ${isUploading ? 'max-h-[60vh]' : 'max-h-[50vh]'}`}>
-                {uploadSessionDocuments.map((doc) => {
-                  const progress = getUploadProgressSummary(doc);
-                  const barClassName = progress.tone === 'emerald'
-                    ? 'bg-emerald-500'
-                    : progress.tone === 'rose'
-                      ? 'bg-rose-500'
-                      : 'bg-blue-600 dark:bg-blue-400';
+            {!isOverlayMinimized && (
+              <div className={isUploading ? '' : 'p-6 pt-4'}>
+                {uploadSessionDocuments.length > 0 ? (
+                  <div className={`space-y-3 overflow-y-auto pr-1 ${isUploading ? 'max-h-[60vh]' : 'max-h-[50vh]'}`}>
+                    {uploadSessionDocuments.map((doc) => {
+                      const progress = getUploadProgressSummary(doc);
+                      const barClassName = progress.tone === 'emerald'
+                        ? 'bg-emerald-500'
+                        : progress.tone === 'rose'
+                          ? 'bg-rose-500'
+                          : 'bg-blue-600 dark:bg-blue-400';
 
-                  return (
-                    <div
-                      key={doc.id}
-                      className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 dark:border-slate-700 dark:bg-slate-900/40"
-                    >
-                      <div className="mb-3 flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-sm font-semibold text-slate-800 dark:text-white">{doc.name}</h3>
-                          <p className="mt-1 text-xs font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{progress.phase}</p>
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                            {progress.total > 0 ? `${progress.current} / ${progress.total} pages` : 'Starting...'}
-                          </p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">
-                            {progress.percent === null ? 'Preparing' : `${progress.percent}%`}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                      return (
                         <div
-                          className={`${barClassName} h-full rounded-full ${progress.indeterminate ? 'animate-pulse' : 'transition-[width] duration-500 ease-out'}`}
-                          style={{ width: progress.percent === null ? '20%' : `${progress.percent}%` }}
-                        />
-                      </div>
+                          key={doc.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 dark:border-slate-700 dark:bg-slate-900/40"
+                        >
+                          <div className="mb-3 flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <h3 className="truncate text-sm font-semibold text-slate-800 dark:text-white">{doc.name}</h3>
+                              <p className="mt-1 text-xs font-medium uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{progress.phase}</p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                                {progress.total > 0 ? `${progress.current} / ${progress.total} pages` : 'Starting...'}
+                              </p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">
+                                {progress.percent === null ? 'Preparing' : `${progress.percent}%`}
+                              </p>
+                            </div>
+                          </div>
 
-                      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
-                        <span>{progress.detail}</span>
-                        <span className="shrink-0">{progress.remainingLabel}</span>
-                      </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                            <div
+                              className={`${barClassName} h-full rounded-full ${progress.indeterminate ? 'animate-pulse' : 'transition-[width] duration-500 ease-out'}`}
+                              style={{ width: progress.percent === null ? '20%' : `${progress.percent}%` }}
+                            />
+                          </div>
 
-                      {doc.sourceRenderError && doc.status === 'error' && (
-                        <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{doc.sourceRenderError}</p>
-                      )}
-                    </div>
-                  );
-                })}
+                          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                            <span>{progress.detail}</span>
+                            <span className="shrink-0">{progress.remainingLabel}</span>
+                          </div>
+
+                          {doc.sourceRenderError && doc.status === 'error' && (
+                            <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">{doc.sourceRenderError}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Preparing and uploading your files.</p>
+                )}
               </div>
-            ) : (
-              <p className="text-sm text-slate-500 dark:text-slate-400">Preparing and uploading your files.</p>
             )}
           </div>
         </div>
