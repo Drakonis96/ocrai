@@ -7,7 +7,7 @@ import ProcessingOptionsSelector from './ProcessingOptionsSelector';
 import * as pdfjsLib from 'pdfjs-dist';
 
 interface UploadViewProps {
-  onFileSelect: (files: FileList, options: ProcessingOptions) => void;
+  onFileSelect: (files: FileList, options: ProcessingOptions, filePageCounts?: Map<string, number | null>) => void;
   models: GeminiModel[];
   activeOcrProvider: OcrProvider;
   prompts: PromptPreset[];
@@ -41,6 +41,16 @@ const getFilePageCount = async (file: File): Promise<number> => {
 };
 
 const formatPageCount = (pageCount: number) => `${pageCount} page${pageCount === 1 ? '' : 's'}`;
+
+const buildSelectedFilePageCountMap = (
+  files: File[],
+  metrics: Record<string, SelectedFileMetrics>
+) => new Map(files.map((file) => [
+  getSelectedFileKey(file),
+  typeof metrics[getSelectedFileKey(file)]?.pageCount === 'number'
+    ? metrics[getSelectedFileKey(file)]?.pageCount ?? null
+    : null,
+]));
 
 const UploadView: React.FC<UploadViewProps> = ({
   onFileSelect,
@@ -176,7 +186,7 @@ const UploadView: React.FC<UploadViewProps> = ({
       customPrompt: options.processingMode === 'manual' ? options.customPrompt : undefined,
       removeReferences: options.processingMode !== 'manual' ? options.removeReferences : undefined,
       splitColumns: options.splitColumns === true ? true : undefined,
-    });
+    }, buildSelectedFilePageCountMap(selectedFiles, selectedFileMetrics));
   };
 
   const formatFileSize = (bytes: number) => {

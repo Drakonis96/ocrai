@@ -10,6 +10,12 @@ const DEFAULT_INITIAL_READ_DELAY_MS = 0;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
+const writeJsonFileAtomic = async (filePath, value) => {
+  const tempFilePath = `${filePath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  await fs.promises.writeFile(tempFilePath, JSON.stringify(value, null, 2));
+  await fs.promises.rename(tempFilePath, filePath);
+};
+
 const normalizePositiveInteger = (value, fallbackValue) => {
   const parsedValue = Number(value);
   if (!Number.isFinite(parsedValue)) {
@@ -93,6 +99,16 @@ export const formatProcessingError = (error) => {
 
   return statusCode ? `${statusCode}: ${message}` : message;
 };
+
+const createNoTextResponseError = () => {
+  const error = new Error('OCR response did not contain any text blocks');
+  error.statusCode = 502;
+  error.expose = true;
+  return error;
+};
+
+const hasTextInBlocks = (blocks = []) =>
+  blocks.some((block) => typeof block?.text === 'string' && block.text.trim().length > 0);
 
 export const isRetryableProcessingError = (error) => {
   const statusCode = Number(error?.statusCode ?? error?.status ?? error?.response?.status);
@@ -262,14 +278,25 @@ const readMetadataWithRetry = async (metadataPath, config, logger) => {
   return null;
 };
 
-const normalizeProcessPageResult = (result) => {
+export const normalizeProcessPageResult = (result) => {
   if (Array.isArray(result)) {
+    if (!hasTextInBlocks(result)) {
+      throw createNoTextResponseError();
+    }
+
     return { blocks: result, blankPage: false };
   }
 
+  const blankPage = result?.blankPage === true;
+  const blocks = Array.isArray(result?.blocks) ? result.blocks : [];
+
+  if (!blankPage && !hasTextInBlocks(blocks)) {
+    throw createNoTextResponseError();
+  }
+
   return {
-    blocks: Array.isArray(result?.blocks) ? result.blocks : [],
-    blankPage: result?.blankPage === true,
+    blocks: blankPage ? [] : blocks,
+    blankPage,
   };
 };
 
@@ -362,7 +389,7 @@ export const createDocumentProcessingManager = ({
 
         metadataWriteQueue = metadataWriteQueue
           .catch(() => {})
-          .then(() => fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2)));
+          .then(() => writeJsonFileAtomic(metadataPath, docData));
         await metadataWriteQueue;
       };
 
@@ -499,7 +526,7 @@ export const createDocumentProcessingManager = ({
           const currentData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
           normalizeDocumentRuntimeState(currentData, { resetInFlightProcessing: true });
           currentData.status = 'error';
-          await fs.promises.writeFile(metadataPath, JSON.stringify(currentData, null, 2));
+          await writeJsonFileAtomic(metadataPath, currentData);
         }
       } catch (updateError) {
         logger.error('Failed to update document error status', updateError);
@@ -526,7 +553,7 @@ export const createDocumentProcessingManager = ({
         try {
           const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
           normalizeDocumentRuntimeState(docData, { resetInFlightProcessing: true });
-          await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+          await writeJsonFileAtomic(metadataPath, docData);
           if (!documentNeedsBackgroundProcessing(docData)) {
             return;
           }

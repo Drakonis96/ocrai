@@ -116,7 +116,8 @@ const reprocessPage = async (
   processingMode: ProcessingOptions['processingMode'] = 'ocr',
   targetLanguage?: string,
   customPrompt?: string,
-  removeReferences?: boolean
+  removeReferences?: boolean,
+  splitColumns?: boolean
 ): Promise<TextBlock[]> => {
   try {
     const response = await fetch('/api/reprocess-page', {
@@ -132,7 +133,8 @@ const reprocessPage = async (
         processingMode,
         targetLanguage,
         customPrompt,
-        removeReferences
+        removeReferences,
+        splitColumns
       }),
     });
 

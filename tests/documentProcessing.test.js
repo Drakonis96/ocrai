@@ -194,6 +194,33 @@ describe('document processing manager', () => {
     await expect(fs.readFile(path.join(docDir, 'page_1.md'), 'utf-8')).rejects.toThrow();
   });
 
+  it('treats non-blank OCR responses without text as an error', async () => {
+    const docId = 'doc-empty-response';
+    const metadata = createMetadata({
+      docId,
+      pages: [createPage(docId, 1)],
+    });
+    const { dataDir, docDir } = await createFixture(metadata);
+
+    const manager = createManager(
+      dataDir,
+      async () => ({
+        blankPage: false,
+        blocks: [],
+      }),
+      { maxRetries: 0 }
+    );
+
+    await manager.processDocumentBackground(docId);
+
+    const stored = await readMetadata(docDir);
+    expect(stored.status).toBe('error');
+    expect(stored.processedPages).toBe(0);
+    expect(stored.failedPages).toBe(1);
+    expect(stored.pages[0].status).toBe('error');
+    expect(stored.pages[0].lastError).toContain('502: OCR response did not contain any text blocks');
+  });
+
   it('resumes pending documents automatically from persisted page state', async () => {
     const docId = 'doc-resume';
     const metadata = createMetadata({

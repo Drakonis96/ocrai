@@ -5,7 +5,8 @@ import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import EditorView from '../components/Editor/EditorView';
-import type { DocumentData } from '../types';
+import { reprocessPage } from '../services/geminiService';
+import { BlockLabel, type DocumentData } from '../types';
 
 vi.mock('../components/Editor/ImageViewer', () => ({
   default: () => React.createElement('div', null, 'image-viewer'),
@@ -22,6 +23,8 @@ vi.mock('../components/ProcessingOptionsSelector', () => ({
 vi.mock('../services/geminiService', () => ({
   reprocessPage: vi.fn(),
 }));
+
+const reprocessPageMock = vi.mocked(reprocessPage);
 
 const buildDocument = (name: string): DocumentData => ({
   id: 'doc-long-name',
@@ -83,12 +86,16 @@ const installMatchMedia = (matchesByQuery: Record<string, boolean>) => {
 describe('Editor header layout', () => {
   let container: HTMLDivElement;
   let root: Root;
+  let alertMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    reprocessPageMock.mockReset();
+    alertMock = vi.fn();
+    vi.stubGlobal('alert', alertMock);
   });
 
   afterEach(async () => {
@@ -96,6 +103,7 @@ describe('Editor header layout', () => {
       root.unmount();
     });
     container.remove();
+    vi.unstubAllGlobals();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -190,5 +198,132 @@ describe('Editor header layout', () => {
 
     expect(onPersistDocument).toHaveBeenCalledWith(expect.objectContaining({ name: 'after-rename.pdf' }));
     expect(container.querySelector('[data-testid="editor-document-title"]')?.textContent).toContain('after-rename.pdf');
+  });
+
+  it('reprocesses the current page with the document OCR options by default', async () => {
+    installMatchMedia({
+      '(max-width: 1023px)': false,
+      '(max-width: 1279px)': false,
+    });
+
+    reprocessPageMock.mockResolvedValue([
+      {
+        id: 'block-1',
+        text: 'Texto reprocesado',
+        label: BlockLabel.MAIN_TEXT,
+        box_2d: [0, 0, 1, 1],
+      },
+    ]);
+
+    const translatedDoc: DocumentData = {
+      ...buildDocument('translated.pdf'),
+      modelUsed: 'doc-model',
+      processingMode: 'translation',
+      targetLanguage: 'Deutsch',
+      customPrompt: 'Keep headings intact',
+      removeReferences: false,
+      splitColumns: true,
+    };
+
+    await act(async () => {
+      root.render(
+        <EditorView
+          doc={translatedDoc}
+          onBack={vi.fn()}
+          onPersistDocument={vi.fn(async (doc) => doc)}
+          onRefreshDocument={vi.fn(async () => null)}
+          models={[
+            {
+              id: 'doc-model',
+              name: 'Doc model',
+              description: 'Preferred model',
+              provider: 'gemini',
+              isCustom: false,
+              isAutodetected: false,
+            },
+          ]}
+          activeOcrProvider="gemini"
+          prompts={[]}
+          onOpenSettings={vi.fn()}
+        />
+      );
+    });
+
+    const openReprocessButton = container.querySelector('button[aria-label="Reprocess"]') as HTMLButtonElement | null;
+    expect(openReprocessButton).not.toBeNull();
+
+    await act(async () => {
+      openReprocessButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const confirmButton = container.querySelector('button[aria-label="Reprocess page"]') as HTMLButtonElement | null;
+    expect(confirmButton).not.toBeNull();
+
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(reprocessPageMock).toHaveBeenCalledWith(
+      'doc-long-name',
+      0,
+      'doc-model',
+      'gemini',
+      'translation',
+      'Deutsch',
+      'Keep headings intact',
+      false,
+      true
+    );
+  });
+
+  it('retries failed page reprocessing the selected number of times and shows the final error', async () => {
+    installMatchMedia({
+      '(max-width: 1023px)': false,
+      '(max-width: 1279px)': false,
+    });
+
+    reprocessPageMock.mockRejectedValue(new Error('502: OCR response did not contain any text blocks'));
+
+    await act(async () => {
+      root.render(
+        <EditorView
+          doc={buildDocument('retry.pdf')}
+          onBack={vi.fn()}
+          onPersistDocument={vi.fn(async (doc) => doc)}
+          onRefreshDocument={vi.fn(async () => buildDocument('retry.pdf'))}
+          models={[]}
+          activeOcrProvider="gemini"
+          prompts={[]}
+          onOpenSettings={vi.fn()}
+        />
+      );
+    });
+
+    await act(async () => {
+      (container.querySelector('button[aria-label="Reprocess"]') as HTMLButtonElement | null)
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const retriesInput = container.querySelector('[data-testid="reprocess-retries-input"]') as HTMLInputElement | null;
+    expect(retriesInput).not.toBeNull();
+
+    await act(async () => {
+      if (retriesInput) {
+        const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        valueSetter?.call(retriesInput, '2');
+        retriesInput.dispatchEvent(new Event('input', { bubbles: true }));
+        retriesInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    await act(async () => {
+      (container.querySelector('button[aria-label="Reprocess page"]') as HTMLButtonElement | null)
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(reprocessPageMock).toHaveBeenCalledTimes(3);
+    expect(alertMock).toHaveBeenCalledWith(
+      'Failed to reprocess page 1.\nPage 1: 502: OCR response did not contain any text blocks'
+    );
   });
 });

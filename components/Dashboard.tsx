@@ -275,11 +275,23 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
 
     const document = item as DocumentData;
-    if (document.totalPages === 0) {
+    const totalPages = Math.max(document.totalPages ?? 0, Array.isArray(document.pages) ? document.pages.length : 0);
+    if (totalPages === 0) {
       return 0;
     }
 
-    return document.processedPages / document.totalPages;
+    const activeProcessingPages = Array.isArray(document.pages)
+      ? document.pages.filter((page) => page?.status === 'processing').length
+      : 0;
+    const completedPages = Math.min(
+      Math.max(document.processedPages ?? 0, 0) + Math.max(document.failedPages ?? 0, 0),
+      totalPages
+    );
+    const displayedProgress = document.status === 'uploading'
+      ? Math.min(Math.max(document.sourceRenderCompletedPages ?? 0, 0), totalPages)
+      : Math.min(completedPages + activeProcessingPages, totalPages);
+
+    return displayedProgress / totalPages;
   };
 
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
@@ -1856,6 +1868,17 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
   }
 
   const doc = item as DocumentData;
+  const totalPages = Math.max(doc.totalPages, doc.pages.length);
+  const activeProcessingPages = Array.isArray(doc.pages)
+    ? doc.pages.filter((page) => page?.status === 'processing').length
+    : 0;
+  const completedPages = Math.min(
+    Math.max(doc.processedPages ?? 0, 0) + Math.max(doc.failedPages ?? 0, 0),
+    totalPages
+  );
+  const displayedProgress = doc.status === 'uploading'
+    ? Math.min(Math.max(doc.sourceRenderCompletedPages ?? 0, 0), totalPages)
+    : Math.min(completedPages + activeProcessingPages, totalPages);
 
   return (
     <tr
@@ -1915,8 +1938,8 @@ const DesktopRow: React.FC<SharedItemProps> = memo(({
       <td className="px-6 py-4">
         <StatusWithProgress
           status={doc.status}
-          processed={doc.processedPages}
-          total={doc.totalPages}
+          processed={displayedProgress}
+          total={totalPages}
           failedPages={doc.failedPages}
         />
       </td>
@@ -2044,6 +2067,17 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
   }
 
   const doc = item as DocumentData;
+  const totalPages = Math.max(doc.totalPages, doc.pages.length);
+  const activeProcessingPages = Array.isArray(doc.pages)
+    ? doc.pages.filter((page) => page?.status === 'processing').length
+    : 0;
+  const completedPages = Math.min(
+    Math.max(doc.processedPages ?? 0, 0) + Math.max(doc.failedPages ?? 0, 0),
+    totalPages
+  );
+  const displayedProgress = doc.status === 'uploading'
+    ? Math.min(Math.max(doc.sourceRenderCompletedPages ?? 0, 0), totalPages)
+    : Math.min(completedPages + activeProcessingPages, totalPages);
 
   return (
     <div
@@ -2096,8 +2130,8 @@ const MobileCard: React.FC<SharedItemProps> = memo(({
           <div className="mt-4">
             <StatusWithProgress
               status={doc.status}
-              processed={doc.processedPages}
-              total={doc.totalPages}
+              processed={displayedProgress}
+              total={totalPages}
               failedPages={doc.failedPages}
             />
           </div>

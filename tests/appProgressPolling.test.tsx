@@ -407,4 +407,56 @@ describe('App processing polling', () => {
     expect(container.querySelector('[data-testid="upload-progress-shell"]')?.getAttribute('data-mode')).toBe('panel');
     expect(alertMock).not.toHaveBeenCalled();
   });
+
+  it('keeps visual progress moving when pages are already in Gemini processing', async () => {
+    const { default: App } = await import('../App');
+
+    getAllItems.mockResolvedValue([
+      {
+        ...processingDocument,
+        id: 'doc-gemini-active',
+        name: 'gemini-active.pdf',
+        status: 'processing',
+        sourceRenderStatus: 'completed',
+        totalPages: 6,
+        processedPages: 2,
+        failedPages: 1,
+        pages: [
+          {
+            pageNumber: 1,
+            imageUrl: '/api/data/doc-gemini-active/page_1.jpg',
+            blocks: [],
+            status: 'completed',
+            errorDismissed: false,
+            retryCount: 0,
+            lastError: '',
+            nextRetryAt: null,
+            lastAttemptAt: null,
+          },
+          {
+            pageNumber: 2,
+            imageUrl: '/api/data/doc-gemini-active/page_2.jpg',
+            blocks: [],
+            status: 'processing',
+            errorDismissed: false,
+            retryCount: 0,
+            lastError: '',
+            nextRetryAt: null,
+            lastAttemptAt: null,
+          },
+        ],
+      },
+    ]);
+
+    await act(async () => {
+      root.render(React.createElement(App));
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain('gemini-active.pdf');
+    expect(container.textContent).toContain('Processing pages');
+    expect(container.textContent).toContain('2 done, 1 in progress.');
+    expect(container.textContent).toContain('4 / 6 pages');
+    expect(container.querySelector('[data-testid="upload-progress-shell"]')?.getAttribute('data-mode')).toBe('panel');
+  });
 });

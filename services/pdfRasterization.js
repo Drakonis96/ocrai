@@ -5,7 +5,7 @@ import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 
 const DEFAULT_PDF_RENDER_SCALE = 2;
-const DEFAULT_PDF_RENDER_CONCURRENCY = 4;
+const DEFAULT_PDF_RENDER_CONCURRENCY = 2;
 const PDF_MAX_RENDER_DIMENSION = 3072;
 const PDF_MAX_RENDER_PIXELS = 12_000_000;
 const __filename = fileURLToPath(import.meta.url);
@@ -39,6 +39,8 @@ const normalizePositiveInteger = (value, fallbackValue) => {
   const normalizedValue = Math.trunc(parsedValue);
   return normalizedValue > 0 ? normalizedValue : fallbackValue;
 };
+
+const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
 
 const getSafePdfRenderScale = (viewport, requestedScale = DEFAULT_PDF_RENDER_SCALE) => {
   const width = normalizePositiveNumber(viewport?.width, 0);
@@ -156,6 +158,8 @@ export const renderPdfToPageImages = async (pdfBuffer, options = {}) => {
             totalPages: pdf.numPages,
           });
         }
+
+        await yieldToEventLoop();
 
         canvasFactory.destroy({ canvas, context });
       } finally {

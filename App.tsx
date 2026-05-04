@@ -103,12 +103,43 @@ const collectDescendantItemIds = (sourceItems: FileSystemItem[], parentId: strin
     .flatMap((child) => [child.id, ...collectDescendantItemIds(sourceItems, child.id)])
 );
 
+const getUploadFileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+
 const isDocumentInFlight = (doc: DocumentData) => doc.status === 'processing' || doc.status === 'uploading';
 
 const getDocumentPageTotal = (doc: DocumentData) => Math.max(
   Number.isFinite(doc.totalPages) ? doc.totalPages : 0,
   Array.isArray(doc.pages) ? doc.pages.length : 0
 );
+
+const getDocumentActiveProcessingPageCount = (doc: DocumentData) => (
+  Array.isArray(doc.pages)
+    ? doc.pages.filter((page) => page?.status === 'processing').length
+    : 0
+);
+
+const getDocumentDisplayedProgress = (doc: DocumentData) => {
+  const totalPages = getDocumentPageTotal(doc);
+
+  if (doc.status === 'uploading' && (doc.sourceRenderStatus === 'pending' || doc.sourceRenderStatus === 'processing')) {
+    return {
+      processed: Math.min(Math.max(doc.sourceRenderCompletedPages ?? 0, 0), totalPages),
+      total: totalPages,
+    };
+  }
+
+  const completedPages = Math.min(
+    Math.max(doc.processedPages ?? 0, 0) + Math.max(doc.failedPages ?? 0, 0),
+    totalPages
+  );
+  const activeProcessingPages = getDocumentActiveProcessingPageCount(doc);
+
+  return {
+    processed: Math.min(completedPages + activeProcessingPages, totalPages),
+    total: totalPages,
+    activeProcessingPages,
+  };
+};
 
 const getUploadProgressSummary = (doc: DocumentData) => {
   const totalPages = getDocumentPageTotal(doc);
@@ -150,8 +181,11 @@ const getUploadProgressSummary = (doc: DocumentData) => {
   const processedPages = Math.max(doc.processedPages ?? 0, 0);
   const failedPages = Math.max(doc.failedPages ?? 0, 0);
   const retryingPages = Math.max(doc.retryingPages ?? 0, 0);
+  const displayedProgress = getDocumentDisplayedProgress(doc);
   const completedPages = Math.min(processedPages + failedPages, total);
-  const remainingPages = Math.max(total - completedPages, 0);
+  const activeProcessingPages = displayedProgress.activeProcessingPages ?? 0;
+  const visualProgressPages = Math.min(displayedProgress.processed, total);
+  const remainingPages = Math.max(total - visualProgressPages, 0);
 
   if (doc.status === 'ready') {
     return {
@@ -183,13 +217,15 @@ const getUploadProgressSummary = (doc: DocumentData) => {
 
   return {
     phase: 'Processing pages',
-    detail: retryingPages > 0
-      ? `${processedPages} done, ${retryingPages} queued for retry.`
-      : `${completedPages} of ${total} pages processed.`,
+    detail: activeProcessingPages > 0
+      ? `${processedPages} done, ${activeProcessingPages} in progress${retryingPages > 0 ? `, ${retryingPages} queued for retry.` : '.'}`
+      : retryingPages > 0
+        ? `${processedPages} done, ${retryingPages} queued for retry.`
+        : `${completedPages} of ${total} pages processed.`,
     remainingLabel: remainingPages > 0 ? `${remainingPages} pages left` : 'Finishing...',
-    current: completedPages,
+    current: visualProgressPages,
     total,
-    percent: Math.round((completedPages / total) * 100),
+    percent: Math.round((visualProgressPages / total) * 100),
     tone: doc.status === 'error' ? 'rose' : 'blue',
     indeterminate: false,
   };
@@ -324,18 +360,26 @@ const App: React.FC = () => {
     (item) => item.type === 'file' && ((item as DocumentData).status === 'processing' || (item as DocumentData).status === 'uploading')
   );
   const uploadSessionDocuments = useMemo(() => {
-    if (uploadSessionDocs.length === 0) {
-      return [];
-    }
-
     const documentsById = new Map(
       items
         .filter((item): item is DocumentData => item.type === 'file')
         .map((item) => [item.id, item])
     );
 
-    return uploadSessionDocs
-      .map((doc) => documentsById.get(doc.id) ?? doc)
+    const persistedTrackedDocs = items
+      .filter((item): item is DocumentData => item.type === 'file')
+      .filter((doc) => isDocumentInFlight(doc));
+
+    if (uploadSessionDocs.length === 0) {
+      return persistedTrackedDocs;
+    }
+
+    const sessionTrackedDocs = uploadSessionDocs
+      .map((doc) => documentsById.get(doc.id) ?? doc);
+
+    const sessionTrackedDocIds = new Set(sessionTrackedDocs.map((doc) => doc.id));
+
+    return [...sessionTrackedDocs, ...persistedTrackedDocs.filter((doc) => !sessionTrackedDocIds.has(doc.id))]
       .sort((left, right) => Number(isDocumentInFlight(right)) - Number(isDocumentInFlight(left)) || left.createdAt - right.createdAt);
   }, [items, uploadSessionDocs]);
   const hasActiveUploadSessionDocs = uploadSessionDocuments.some(isDocumentInFlight);
@@ -662,7 +706,11 @@ const App: React.FC = () => {
     downloadBlob(content, 'all_notes.zip');
   };
 
-  const handleFileSelect = async (fileList: FileList, options: ProcessingOptions) => {
+  const handleFileSelect = async (
+    fileList: FileList,
+    options: ProcessingOptions,
+    filePageCounts: Map<string, number | null> = new Map()
+  ) => {
     const files = Array.from(fileList);
     setIsUploading(true);
     setUploadSessionDocs([]);
@@ -675,6 +723,7 @@ const App: React.FC = () => {
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         try {
           const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+          const optimisticPageCount = Math.max(filePageCounts.get(getUploadFileKey(file)) ?? 0, 0);
           const imageData = isPdf
             ? []
             : [{ data: await fileToBase64(file), mimeType: file.type }];
@@ -687,6 +736,7 @@ const App: React.FC = () => {
             createdAt: Date.now(),
             uploadDate: Date.now(),
             status: isPdf ? 'uploading' : 'processing',
+            sourceRenderStatus: isPdf ? 'pending' : undefined,
             sourceRenderCompletedPages: 0,
             modelUsed: options.model,
             ocrProvider: options.ocrProvider ?? ocrSettings.provider,
@@ -698,20 +748,32 @@ const App: React.FC = () => {
             removeReferences: options.removeReferences,
             pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
             splitColumns: options.splitColumns === true,
-            totalPages: imageData.length,
+            totalPages: isPdf ? optimisticPageCount : imageData.length,
             processedPages: 0,
             failedPages: 0,
-            pages: imageData.map((image, index) => ({
-              pageNumber: index + 1,
-              imageUrl: `data:${image.mimeType};base64,${image.data}`,
-              blocks: [],
-              status: 'pending',
-              errorDismissed: false,
-              retryCount: 0,
-              lastError: '',
-              nextRetryAt: null,
-              lastAttemptAt: null,
-            })),
+            pages: isPdf
+              ? Array.from({ length: optimisticPageCount }, (_, index) => ({
+                  pageNumber: index + 1,
+                  imageUrl: '',
+                  blocks: [],
+                  status: 'pending',
+                  errorDismissed: false,
+                  retryCount: 0,
+                  lastError: '',
+                  nextRetryAt: null,
+                  lastAttemptAt: null,
+                }))
+              : imageData.map((image, index) => ({
+                  pageNumber: index + 1,
+                  imageUrl: `data:${image.mimeType};base64,${image.data}`,
+                  blocks: [],
+                  status: 'pending',
+                  errorDismissed: false,
+                  retryCount: 0,
+                  lastError: '',
+                  nextRetryAt: null,
+                  lastAttemptAt: null,
+                })),
           };
 
           setUploadSessionDocs((current) => [...current, newDoc]);

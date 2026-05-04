@@ -43,6 +43,28 @@ type ReprocessScope = 'current' | 'issues';
 
 const MIN_EDITOR_WIDTH = 30;
 const MAX_EDITOR_WIDTH = 70;
+const DEFAULT_REPROCESS_RETRIES = 0;
+
+const createReprocessOptions = (
+  sourceDoc: DocumentData,
+  activeOcrProvider: OcrProvider,
+  models: GeminiModel[]
+): ProcessingOptions => {
+  const requestedModel = sourceDoc.modelUsed || DEFAULT_MODEL_ID;
+  const nextModel = models.length > 0 && !models.some((model) => model.id === requestedModel)
+    ? getPreferredDefaultModelId(models)
+    : requestedModel;
+
+  return {
+    model: nextModel,
+    ocrProvider: activeOcrProvider,
+    processingMode: sourceDoc.processingMode ?? 'ocr',
+    targetLanguage: sourceDoc.targetLanguage || 'Español',
+    customPrompt: sourceDoc.customPrompt || '',
+    removeReferences: sourceDoc.removeReferences !== false,
+    splitColumns: sourceDoc.splitColumns === true,
+  };
+};
 const EditorView: React.FC<EditorViewProps> = ({
   doc,
   onBack,
@@ -69,10 +91,13 @@ const EditorView: React.FC<EditorViewProps> = ({
   const [isUpdatingErrorDismissal, setIsUpdatingErrorDismissal] = useState(false);
   const [showReprocessModal, setShowReprocessModal] = useState(false);
   const [reprocessScope, setReprocessScope] = useState<ReprocessScope>('current');
+  const [reprocessRetries, setReprocessRetries] = useState(DEFAULT_REPROCESS_RETRIES);
   const [reprocessProgress, setReprocessProgress] = useState<{
     current: number;
     total: number;
     pageNumber: number;
+    attempt: number;
+    totalAttempts: number;
   } | null>(null);
   const [showFullDocument, setShowFullDocument] = useState(true);
   const [showEditor, setShowEditor] = useState(true);
@@ -84,14 +109,9 @@ const EditorView: React.FC<EditorViewProps> = ({
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [isCompactHeaderLayout, setIsCompactHeaderLayout] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-  const [reprocessOptions, setReprocessOptions] = useState<ProcessingOptions>({
-    model: DEFAULT_MODEL_ID,
-    ocrProvider: activeOcrProvider,
-    processingMode: 'ocr',
-    targetLanguage: 'Español',
-    customPrompt: '',
-    removeReferences: true,
-  });
+  const [reprocessOptions, setReprocessOptions] = useState<ProcessingOptions>(() => (
+    createReprocessOptions(doc, activeOcrProvider, models)
+  ));
 
   const getPageText = (
     sourceDoc: DocumentData,
@@ -147,6 +167,7 @@ const EditorView: React.FC<EditorViewProps> = ({
     setIsSaved(true);
     setShowEditor(true);
     setMobilePanel('preview');
+    setReprocessRetries(DEFAULT_REPROCESS_RETRIES);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.id]);
 
@@ -452,6 +473,8 @@ const EditorView: React.FC<EditorViewProps> = ({
   };
 
   const handleOpenCurrentPageReprocess = () => {
+    setReprocessOptions(createReprocessOptions(workingDoc, activeOcrProvider, models));
+    setReprocessRetries(DEFAULT_REPROCESS_RETRIES);
     setReprocessScope('current');
     setShowReprocessModal(true);
   };
@@ -461,6 +484,8 @@ const EditorView: React.FC<EditorViewProps> = ({
       return;
     }
 
+    setReprocessOptions(createReprocessOptions(workingDoc, activeOcrProvider, models));
+    setReprocessRetries(DEFAULT_REPROCESS_RETRIES);
     setReprocessScope('issues');
     setShowReprocessModal(true);
   };
@@ -476,6 +501,9 @@ const EditorView: React.FC<EditorViewProps> = ({
     let nextOverrides = pageTextOverrides;
     let successfulPages = 0;
     let failedPages = 0;
+    let firstFailedPageIndex: number | null = null;
+    const failureMessages: string[] = [];
+    const totalAttempts = reprocessRetries + 1;
 
     setIsReprocessing(true);
     setShowReprocessModal(false);
@@ -483,33 +511,58 @@ const EditorView: React.FC<EditorViewProps> = ({
     try {
       for (let index = 0; index < pageIndexes.length; index += 1) {
         const pageIndex = pageIndexes[index];
-        setReprocessProgress({
-          current: index + 1,
-          total: pageIndexes.length,
-          pageNumber: pageIndex + 1,
-        });
+        let pageCompleted = false;
 
-        try {
-          const newBlocks = await reprocessPage(
-            docId,
-            pageIndex,
-            reprocessOptions.model,
-            activeOcrProvider,
-            reprocessOptions.processingMode,
-            reprocessOptions.targetLanguage,
-            reprocessOptions.customPrompt,
-            reprocessOptions.removeReferences
-          );
+        for (let attemptIndex = 0; attemptIndex < totalAttempts; attemptIndex += 1) {
+          setReprocessProgress({
+            current: index + 1,
+            total: pageIndexes.length,
+            pageNumber: pageIndex + 1,
+            attempt: attemptIndex + 1,
+            totalAttempts,
+          });
 
-          const updatedState = applyReprocessedPage(nextDoc, nextOverrides, pageIndex, newBlocks);
-          nextDoc = updatedState.nextDoc;
-          nextOverrides = updatedState.nextOverrides;
-          successfulPages += 1;
-          setPageTextOverrides(nextOverrides);
-          applyRefreshedDocumentState(nextDoc, nextOverrides, pageIndex);
-        } catch (error) {
-          failedPages += 1;
-          console.error(`Reprocess failed for page ${pageIndex + 1}`, error);
+          try {
+            const newBlocks = await reprocessPage(
+              docId,
+              pageIndex,
+              reprocessOptions.model,
+              activeOcrProvider,
+              reprocessOptions.processingMode,
+              reprocessOptions.targetLanguage,
+              reprocessOptions.customPrompt,
+              reprocessOptions.removeReferences,
+              reprocessOptions.splitColumns
+            );
+
+            const updatedState = applyReprocessedPage(nextDoc, nextOverrides, pageIndex, newBlocks);
+            nextDoc = updatedState.nextDoc;
+            nextOverrides = updatedState.nextOverrides;
+            successfulPages += 1;
+            pageCompleted = true;
+            setPageTextOverrides(nextOverrides);
+            applyRefreshedDocumentState(nextDoc, nextOverrides, pageIndex);
+            break;
+          } catch (error: any) {
+            console.error(
+              `Reprocess failed for page ${pageIndex + 1} on attempt ${attemptIndex + 1}/${totalAttempts}`,
+              error
+            );
+
+            if (attemptIndex < totalAttempts - 1) {
+              continue;
+            }
+
+            failedPages += 1;
+            if (firstFailedPageIndex === null) {
+              firstFailedPageIndex = pageIndex;
+            }
+            failureMessages.push(`Page ${pageIndex + 1}: ${error?.message || 'Unknown error'}`);
+          }
+        }
+
+        if (!pageCompleted) {
+          continue;
         }
       }
 
@@ -518,7 +571,7 @@ const EditorView: React.FC<EditorViewProps> = ({
         applyRefreshedDocumentState(
           refreshedDoc,
           nextOverrides,
-          pageIndexes[pageIndexes.length - 1]
+          firstFailedPageIndex ?? pageIndexes[pageIndexes.length - 1]
         );
       }
 
@@ -528,9 +581,9 @@ const EditorView: React.FC<EditorViewProps> = ({
       }
 
       if (!multiplePages && failedPages > 0) {
-        alert(`Failed to reprocess page ${pageIndexes[0] + 1}. It still needs review.`);
+        alert(`Failed to reprocess page ${pageIndexes[0] + 1}.\n${failureMessages[0] || 'It still needs review.'}`);
       } else if (multiplePages && failedPages > 0) {
-        alert(`${failedPages} pages could not be reprocessed and still need review.`);
+        alert(`${failedPages} pages could not be reprocessed and still need review.\n\n${failureMessages.join('\n')}`);
       }
     } catch (error: any) {
       const refreshedDoc = await onRefreshDocument(docId);
@@ -634,8 +687,8 @@ const EditorView: React.FC<EditorViewProps> = ({
     ? `Reprocessing pages (${reprocessProgress.current}/${reprocessProgress.total})`
     : `Reprocessing Page ${reprocessProgress?.pageNumber ?? activePage + 1}...`;
   const reprocessOverlayDescription = reprocessProgress?.total && reprocessProgress.total > 1
-    ? `Working through issue pages one by one. Current page: ${reprocessProgress.pageNumber}.`
-    : 'Please wait while we analyze the document with Gemini AI.';
+    ? `Working through issue pages one by one. Current page: ${reprocessProgress.pageNumber}. Attempt ${reprocessProgress.attempt}/${reprocessProgress.totalAttempts}.`
+    : `Please wait while we analyze the document with Gemini AI. Attempt ${reprocessProgress?.attempt ?? 1}/${reprocessProgress?.totalAttempts ?? 1}.`;
 
   const renderExportOptions = (className: string) => (
     <div className={className} onClick={(event) => event.stopPropagation()}>
@@ -1110,6 +1163,24 @@ const EditorView: React.FC<EditorViewProps> = ({
                 prompts={prompts}
                 onOpenSettings={onOpenSettings}
               />
+
+              <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
+                <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                  Retry Failed Reprocess Attempts
+                </label>
+                <input
+                  data-testid="reprocess-retries-input"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={reprocessRetries}
+                  onChange={(event) => setReprocessRetries(Math.max(0, Math.trunc(Number(event.target.value) || 0)))}
+                  className="w-full rounded-2xl border border-slate-300 bg-white p-3 text-sm text-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+                />
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  Number of extra attempts per page if OCR fails or returns no text. Default: 0.
+                </p>
+              </div>
             </div>
 
             <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/50">

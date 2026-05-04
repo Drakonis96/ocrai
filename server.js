@@ -16,6 +16,7 @@ import {
   formatProcessingError,
   getPageNumber,
   getPagesPerBatch,
+  normalizeProcessPageResult,
   normalizeDocumentRuntimeState,
 } from './services/documentProcessing.js';
 import { buildOcrPrompt } from './services/ocrPromptBuilder.js';
@@ -65,6 +66,10 @@ const ALLOWED_IMAGE_MIME_TYPES = new Map([
   ['image/png', 'png'],
   ['image/webp', 'webp'],
 ]);
+const DEFAULT_METADATA_READ_RETRIES = 5;
+const DEFAULT_METADATA_READ_RETRY_DELAY_MS = 25;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 const parseTrustProxy = (value) => {
   if (!value) {
@@ -161,10 +166,52 @@ const normalizePositiveInteger = (value, fallbackValue) => {
   return normalizedValue > 0 ? normalizedValue : fallbackValue;
 };
 
+const normalizeNonNegativeInteger = (value, fallbackValue = 0) => {
+  const parsedValue = Number(value);
+  if (!Number.isFinite(parsedValue)) {
+    return fallbackValue;
+  }
+
+  const normalizedValue = Math.trunc(parsedValue);
+  return normalizedValue >= 0 ? normalizedValue : fallbackValue;
+};
+
 const findPageIndexByNumber = (pages, pageNumber, fallbackIndex) => {
   const targetPageNumber = normalizePositiveInteger(pageNumber, fallbackIndex + 1);
   const pageIndex = pages.findIndex((page, index) => getPageNumber(page, index + 1) === targetPageNumber);
   return pageIndex >= 0 ? pageIndex : fallbackIndex;
+};
+
+const readJsonFileWithRetry = async (
+  filePath,
+  {
+    retries = DEFAULT_METADATA_READ_RETRIES,
+    retryDelayMs = DEFAULT_METADATA_READ_RETRY_DELAY_MS,
+  } = {}
+) => {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      return JSON.parse(await fs.promises.readFile(filePath, 'utf-8'));
+    } catch (error) {
+      lastError = error;
+
+      if (attempt === retries - 1) {
+        break;
+      }
+
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+};
+
+const writeJsonFileAtomic = async (filePath, value) => {
+  const tempFilePath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  await fs.promises.writeFile(tempFilePath, JSON.stringify(value, null, 2));
+  await fs.promises.rename(tempFilePath, filePath);
 };
 
 app.disable('x-powered-by');
@@ -1240,7 +1287,7 @@ const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false
     docData.sourceRenderCompletedPages = 0;
     delete docData.sourceRenderError;
     normalizeDocumentRuntimeState(docData);
-    await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+    await writeJsonFileAtomic(metadataPath, docData);
 
     const pdfBuffer = await fs.promises.readFile(sourcePdfPath);
     let metadataWriteQueue = Promise.resolve();
@@ -1270,7 +1317,7 @@ const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false
           latestDocData.sourceRenderCompletedPages = completedPages;
           delete latestDocData.sourceRenderError;
           normalizeDocumentRuntimeState(latestDocData);
-          await fs.promises.writeFile(metadataPath, JSON.stringify(latestDocData, null, 2));
+          await writeJsonFileAtomic(metadataPath, latestDocData);
         });
 
       await metadataWriteQueue;
@@ -1298,7 +1345,7 @@ const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false
     latestDocData.sourceRenderCompletedPages = renderedPages.length;
     delete latestDocData.sourceRenderError;
     normalizeDocumentRuntimeState(latestDocData);
-    await fs.promises.writeFile(metadataPath, JSON.stringify(latestDocData, null, 2));
+    await writeJsonFileAtomic(metadataPath, latestDocData);
 
     if (startProcessing) {
       processDocumentBackground(safeDocId).catch((error) => {
@@ -1316,7 +1363,7 @@ const rasterizePdfDocumentInBackground = async (docId, { startProcessing = false
         docData.sourceRenderStatus = 'error';
         docData.sourceRenderError = formatProcessingError(error);
         normalizeDocumentRuntimeState(docData);
-        await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+        await writeJsonFileAtomic(metadataPath, docData);
       }
     } catch (persistError) {
       console.error(`Failed to persist rasterization error for ${docId}`, persistError);
@@ -1336,6 +1383,7 @@ app.post('/api/reprocess-page', async (req, res) => {
     targetLanguage,
     customPrompt,
     removeReferences,
+    splitColumns,
   } = req.body;
   
   try {
@@ -1352,7 +1400,7 @@ app.post('/api/reprocess-page', async (req, res) => {
         return res.status(404).json({ error: "Document not found" });
     }
 
-    const docData = JSON.parse(await fs.promises.readFile(metadataPath, 'utf-8'));
+    const docData = await readJsonFileWithRetry(metadataPath);
     normalizeDocumentRuntimeState(docData);
     docData.ocrProvider = normalizeOcrProvider(docData.ocrProvider);
     const page = docData.pages[parsedPageIndex];
@@ -1378,19 +1426,45 @@ app.post('/api/reprocess-page', async (req, res) => {
 
     console.log(`Calling OCR provider for reprocessing... Provider: ${normalizeOcrProvider(modelProvider || docData.ocrProvider)}, Model: ${modelName || 'default'}`);
     const nextProvider = normalizeOcrProvider(modelProvider || docData.ocrProvider);
+    const nextProcessingMode = typeof processingMode === 'string'
+      ? processingMode
+      : (docData.processingMode || 'ocr');
+    const nextTargetLanguage = typeof targetLanguage === 'string'
+      ? targetLanguage
+      : (docData.targetLanguage || '');
+    const nextCustomPrompt = typeof customPrompt === 'string'
+      ? customPrompt
+      : (docData.customPrompt || '');
+    const nextRemoveReferences = typeof removeReferences === 'boolean'
+      ? removeReferences
+      : (docData.removeReferences !== false);
+    const nextSplitColumns = typeof splitColumns === 'boolean'
+      ? splitColumns
+      : (docData.splitColumns === true);
 
     try {
-      const result = await processPageWithProvider({
-        provider: nextProvider,
-        base64Image,
-        mimeType,
-        modelName,
-        processingMode,
-        targetLanguage,
-        customPrompt,
-        removeReferences: removeReferences !== false,
-      });
-      const blocks = Array.isArray(result?.blocks) ? result.blocks : [];
+      const result = nextSplitColumns
+        ? await processPageWithColumnSplitting({
+            provider: nextProvider,
+            base64Image,
+            mimeType,
+            modelName,
+            processingMode: nextProcessingMode,
+            targetLanguage: nextTargetLanguage,
+            customPrompt: nextCustomPrompt,
+            removeReferences: nextRemoveReferences,
+          })
+        : await processPageWithProvider({
+            provider: nextProvider,
+            base64Image,
+            mimeType,
+            modelName,
+            processingMode: nextProcessingMode,
+            targetLanguage: nextTargetLanguage,
+            customPrompt: nextCustomPrompt,
+            removeReferences: nextRemoveReferences,
+          });
+      const { blocks, blankPage } = normalizeProcessPageResult(result);
 
       console.log(`OCR reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
 
@@ -1398,7 +1472,7 @@ app.post('/api/reprocess-page', async (req, res) => {
       docData.ocrProvider = nextProvider;
       docData.pages[parsedPageIndex].blocks = blocks;
       docData.pages[parsedPageIndex].status = 'completed';
-      docData.pages[parsedPageIndex].blankPage = result?.blankPage === true;
+      docData.pages[parsedPageIndex].blankPage = blankPage;
       docData.pages[parsedPageIndex].errorDismissed = false;
       docData.pages[parsedPageIndex].retryCount = 0;
       docData.pages[parsedPageIndex].lastError = '';
@@ -1409,19 +1483,28 @@ app.post('/api/reprocess-page', async (req, res) => {
       await fs.promises.writeFile(path.join(docDir, `page_${parsedPageIndex + 1}.md`), mdContent);
 
       normalizeDocumentRuntimeState(docData);
-      await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+      await writeJsonFileAtomic(metadataPath, docData);
 
-      res.json({ blocks, blankPage: result?.blankPage === true });
+      res.json({ blocks, blankPage });
     } catch (error) {
       docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
       docData.pages[parsedPageIndex].lastError = formatProcessingError(error);
       docData.pages[parsedPageIndex].errorDismissed = false;
+      docData.pages[parsedPageIndex].retryCount = normalizeNonNegativeInteger(docData.pages[parsedPageIndex].retryCount, 0) + 1;
       if (docData.pages[parsedPageIndex].status !== 'completed') {
         docData.pages[parsedPageIndex].status = 'error';
         docData.pages[parsedPageIndex].nextRetryAt = null;
       }
       normalizeDocumentRuntimeState(docData);
-      await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+      await writeJsonFileAtomic(metadataPath, docData);
+      if (!error?.expose) {
+        const publicError = createPublicError(
+          Number.isInteger(error?.statusCode) ? error.statusCode : 502,
+          formatProcessingError(error)
+        );
+        publicError.cause = error;
+        throw publicError;
+      }
       throw error;
     }
 
@@ -1512,7 +1595,7 @@ app.post('/api/reprocess-document', async (req, res) => {
     );
 
     normalizeDocumentRuntimeState(docData);
-    await fs.promises.writeFile(metadataPath, JSON.stringify(docData, null, 2));
+  await writeJsonFileAtomic(metadataPath, docData);
 
     processDocumentBackground(safeDocId).catch((error) => {
       console.error(`Background reprocessing trigger failed for ${safeDocId}`, error);
@@ -1634,27 +1717,28 @@ app.use('/api/data', express.static(DATA_DIR, {
 
 app.get('/api/documents', async (req, res) => {
   try {
-    const items = [];
     const entries = await fs.promises.readdir(DATA_DIR, { withFileTypes: true });
 
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
+    const items = (await Promise.all(entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
         const metadataPath = path.join(DATA_DIR, entry.name, 'metadata.json');
         try {
-          const data = await fs.promises.readFile(metadataPath, 'utf-8');
-          const parsedItem = JSON.parse(data);
+          const parsedItem = await readJsonFileWithRetry(metadataPath);
           if (parsedItem?.type === 'file') {
             normalizeDocumentRuntimeState(parsedItem);
             parsedItem.ocrProvider = normalizeOcrProvider(parsedItem.ocrProvider);
             parsedItem.isRead = parsedItem.isRead === true;
             parsedItem.labels = normalizeDocumentLabels(parsedItem.labels);
           }
-          items.push(parsedItem);
+          return parsedItem;
         } catch (err) {
           console.warn(`Skipping invalid directory ${entry.name}:`, err.message);
+          return null;
         }
-      }
-    }
+      })))
+      .filter(Boolean);
+
     res.json(items);
   } catch (e) {
     handleRouteError(res, 'Failed to list documents', e);
@@ -1798,10 +1882,7 @@ app.post('/api/documents', async (req, res) => {
     }
 
     // Save metadata (now with URLs instead of base64)
-    await fs.promises.writeFile(
-      path.join(docDir, 'metadata.json'), 
-      JSON.stringify(item, null, 2)
-    );
+    await writeJsonFileAtomic(path.join(docDir, 'metadata.json'), item);
 
     // Trigger background processing if requested
     if (isUploadedPdf) {
@@ -1976,7 +2057,7 @@ app.delete('/api/labels/:name', async (req, res) => {
 
         item.labels = nextDocumentLabels;
         normalizeDocumentRuntimeState(item);
-        await fs.promises.writeFile(metadataPath, JSON.stringify(item, null, 2));
+        await writeJsonFileAtomic(metadataPath, item);
       } catch (documentError) {
         console.warn(`Failed to remove deleted label from ${entry.name}:`, documentError.message);
       }

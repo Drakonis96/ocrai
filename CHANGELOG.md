@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.4.4 - 2026-05-04
+
+### Added
+- Added a retry-count selector to page-level reprocessing so manual page retries default to `0` extra attempts and can be increased per run.
+
+### Changed
+- Reworked manual page reprocessing feedback so the progress overlay now shows the current retry attempt when a page is retried.
+
+### Fixed
+- Fixed page reprocessing so it no longer accepts OCR responses that return no text unless the page was explicitly classified as blank.
+- Fixed manual page reprocessing so OCR/provider errors are surfaced back to the editor with the actual page-specific message instead of a generic failure.
+- Fixed manual page reprocessing so the first failed page is brought back into view after refresh, making the persisted error state visible immediately.
+
+### Testing
+- Added regression coverage for empty OCR responses during processing, default page-reprocess option inheritance, retry selection, and page-level error reporting.
+- Verified focused regression tests and production build before release.
+
 ## v1.4.3 - 2026-05-04
 
 ### Added

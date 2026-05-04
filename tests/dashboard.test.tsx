@@ -67,6 +67,27 @@ describe('Dashboard OCR error indicators', () => {
     expect(html).toContain('1 failed page');
   });
 
+  it('shows active processing pages in the visual progress count', () => {
+    const html = renderDashboard([
+      buildDocument({
+        status: 'processing',
+        totalPages: 10,
+        processedPages: 4,
+        failedPages: 1,
+        pages: [
+          {
+            pageNumber: 1,
+            imageUrl: '/api/data/doc-1/page_1.jpg',
+            blocks: [],
+            status: 'processing',
+          },
+        ],
+      }),
+    ]);
+
+    expect(html).toContain('6/10');
+  });
+
   it('hides the failed pages badge once the document no longer reports unresolved errors', () => {
     const html = renderDashboard([
       buildDocument({
