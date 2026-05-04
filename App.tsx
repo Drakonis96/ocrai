@@ -48,21 +48,9 @@ import {
   updateOcrSettings,
 } from './services/ocrSettingsService';
 import { reprocessDocument } from './services/geminiService';
-import { getPdfRenderConcurrency, getSafePdfViewportScale } from './utils/pdfProcessing';
 import { downloadBlob } from './utils/download';
 // @ts-ignore
-import * as pdfjsLib from 'pdfjs-dist';
-// @ts-ignore
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-// @ts-ignore
 import JSZip from 'jszip';
-
-const hasRealPdfWorkerSupport = typeof window !== 'undefined' && 'Worker' in window;
-
-if (hasRealPdfWorkerSupport) {
-  pdfjsLib.GlobalWorkerOptions.workerPort = new Worker(pdfWorkerUrl, { type: 'module' });
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-}
 
 const areItemsEqual = (left: FileSystemItem, right: FileSystemItem) =>
   JSON.stringify(left) === JSON.stringify(right);
@@ -337,75 +325,6 @@ const App: React.FC = () => {
     });
   };
 
-  const convertPdfToImages = async (file: File): Promise<{ data: string; mimeType: string }[]> => {
-    if (!hasRealPdfWorkerSupport) {
-      throw new Error('This browser does not support Web Workers. PDF processing requires a real worker.');
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-
-    try {
-      const images: { data: string; mimeType: string }[] = new Array(pdf.numPages);
-      const renderConcurrency = Math.min(getPdfRenderConcurrency(), pdf.numPages);
-
-      const renderPage = async (pageNum: number) => {
-        const page = await pdf.getPage(pageNum);
-        const canvas = document.createElement('canvas');
-
-        try {
-          const baseViewport = page.getViewport({ scale: 1 });
-          const safeScale = getSafePdfViewportScale(baseViewport, 1.5);
-          const viewport = page.getViewport({ scale: safeScale });
-
-          canvas.width = Math.max(1, Math.ceil(viewport.width));
-          canvas.height = Math.max(1, Math.ceil(viewport.height));
-
-          const context = canvas.getContext('2d', { alpha: false });
-          if (!context) {
-            throw new Error(`Failed to create a canvas context for page ${pageNum}`);
-          }
-
-          context.fillStyle = '#ffffff';
-          context.fillRect(0, 0, canvas.width, canvas.height);
-
-          await page.render({ canvasContext: context, viewport, intent: 'display' } as any).promise;
-
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-          if (!dataUrl.startsWith('data:image/jpeg;base64,')) {
-            throw new Error(`Failed to serialize PDF page ${pageNum}`);
-          }
-
-          images[pageNum - 1] = { data: dataUrl.split(',')[1], mimeType: 'image/jpeg' };
-        } finally {
-          page.cleanup();
-          canvas.width = 0;
-          canvas.height = 0;
-          canvas.remove();
-        }
-      };
-
-      let nextPageNumber = 1;
-      await Promise.all(Array.from({ length: renderConcurrency }, async () => {
-        while (true) {
-          const pageNum = nextPageNumber;
-          nextPageNumber += 1;
-
-          if (pageNum > pdf.numPages) {
-            return;
-          }
-
-          await renderPage(pageNum);
-        }
-      }));
-
-      return images;
-    } finally {
-      pdf.cleanup();
-    }
-  };
-
   const handleCreateFolder = useCallback(async (name: string) => {
     const newFolder: FolderData = {
       id: `folder_${Date.now()}`,
@@ -611,8 +530,8 @@ const App: React.FC = () => {
       for (const file of files) {
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-        const images = isPdf
-          ? await convertPdfToImages(file)
+        const imageData = isPdf
+          ? []
           : [{ data: await fileToBase64(file), mimeType: file.type }];
 
         const newDoc: DocumentData = {
@@ -633,10 +552,10 @@ const App: React.FC = () => {
           removeReferences: options.removeReferences,
           pagesPerBatch: Number.isInteger(options.pagesPerBatch) && (options.pagesPerBatch ?? 0) > 0 ? options.pagesPerBatch : 1,
           splitColumns: options.splitColumns === true,
-          totalPages: images.length,
+          totalPages: imageData.length,
           processedPages: 0,
           failedPages: 0,
-          pages: images.map((image, index) => ({
+          pages: imageData.map((image, index) => ({
             pageNumber: index + 1,
             imageUrl: `data:${image.mimeType};base64,${image.data}`,
             blocks: [],
@@ -649,7 +568,18 @@ const App: React.FC = () => {
           })),
         };
 
-        const savedDoc = await saveItem(newDoc, true) as DocumentData;
+        const uploadPayload = isPdf
+          ? {
+              ...newDoc,
+              sourceFile: {
+                name: file.name,
+                mimeType: 'application/pdf',
+                data: await fileToBase64(file),
+              },
+            }
+          : newDoc;
+
+        const savedDoc = await saveItem(uploadPayload as DocumentData, true) as DocumentData;
         newDocs.push(savedDoc);
       }
 

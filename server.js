@@ -9,6 +9,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import sharp from 'sharp';
+import { renderPdfToPageImages } from './services/pdfRasterization.js';
 import { handleLoginAttempt, verifySession, logoutSession } from './services/authService.js';
 import {
   createDocumentProcessingManager,
@@ -112,6 +113,22 @@ const sanitizeDocumentBaseName = (value) => {
 const getImageExtensionForMimeType = (value) => {
   const mimeType = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return ALLOWED_IMAGE_MIME_TYPES.get(mimeType) || null;
+};
+
+const normalizeUploadedSourceFile = (value) => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const mimeType = typeof value.mimeType === 'string' ? value.mimeType.trim().toLowerCase() : '';
+  const data = typeof value.data === 'string' ? value.data.trim() : '';
+  const name = typeof value.name === 'string' ? value.name.trim() : '';
+
+  if (!mimeType || !data) {
+    return null;
+  }
+
+  return { mimeType, data, name };
 };
 
 const normalizePositiveInteger = (value, fallbackValue) => {
@@ -1557,6 +1574,49 @@ app.post('/api/documents', async (req, res) => {
       await fs.promises.mkdir(docDir, { recursive: true });
     }
 
+    const uploadedSourceFile = item.type === 'file' ? normalizeUploadedSourceFile(item.sourceFile) : null;
+    const isUploadedPdf = uploadedSourceFile
+      && (
+        uploadedSourceFile.mimeType === 'application/pdf'
+        || uploadedSourceFile.name.toLowerCase().endsWith('.pdf')
+        || item.name.toLowerCase().endsWith('.pdf')
+      );
+
+    if (item.type === 'file' && isUploadedPdf) {
+      const pdfBuffer = Buffer.from(uploadedSourceFile.data, 'base64');
+      const renderedPages = await renderPdfToPageImages(pdfBuffer);
+      const sourcePdfPath = path.join(docDir, 'source.pdf');
+
+      await fs.promises.writeFile(sourcePdfPath, pdfBuffer);
+
+      item.pagesPerBatch = getPagesPerBatch(item.pagesPerBatch);
+      item.isRead = item.isRead === true;
+      item.pages = [];
+
+      for (const renderedPage of renderedPages) {
+        const filename = `page_${renderedPage.pageNumber}.${renderedPage.extension}`;
+        await fs.promises.writeFile(path.join(docDir, filename), renderedPage.buffer);
+
+        item.pages.push({
+          pageNumber: renderedPage.pageNumber,
+          imageUrl: `/api/data/${item.id}/${filename}`,
+          blocks: [],
+          status: 'pending',
+          blankPage: false,
+          errorDismissed: false,
+          retryCount: 0,
+          lastError: '',
+          nextRetryAt: null,
+          lastAttemptAt: null,
+        });
+      }
+
+      item.totalPages = renderedPages.length;
+      item.processedPages = 0;
+      item.failedPages = 0;
+      delete item.sourceFile;
+    }
+
     // Handle image saving for files
     if (item.type === 'file' && item.pages && Array.isArray(item.pages)) {
       item.ocrProvider = normalizeOcrProvider(item.ocrProvider);
@@ -1600,6 +1660,10 @@ app.post('/api/documents', async (req, res) => {
       }
 
       normalizeDocumentRuntimeState(item);
+    }
+
+    if (item && typeof item === 'object' && 'sourceFile' in item) {
+      delete item.sourceFile;
     }
 
     // Keep the edited markdown companion aligned with the current document name.
