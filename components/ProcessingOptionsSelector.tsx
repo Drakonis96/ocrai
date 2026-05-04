@@ -13,6 +13,7 @@ interface ProcessingOptionsSelectorProps {
   showRetryOption?: boolean;
   selectedFileCount?: number;
   selectedPageCount?: number | null;
+  knownPageCount?: number;
   hasPendingPageCount?: boolean;
 }
 
@@ -38,10 +39,11 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
   showRetryOption = false,
   selectedFileCount = 0,
   selectedPageCount = null,
+  knownPageCount = 0,
   hasPendingPageCount = false,
 }) => {
   const [selectedPromptId, setSelectedPromptId] = useState('');
-  const [batchSizeChoice, setBatchSizeChoice] = useState('1');
+  const [batchSizeChoice, setBatchSizeChoice] = useState('15');
 
   useEffect(() => {
     if (models.length === 0) {
@@ -132,8 +134,10 @@ const ProcessingOptionsSelector: React.FC<ProcessingOptionsSelectorProps> = ({
                     ? `Selected document: ${selectedPageCount} page${selectedPageCount === 1 ? '' : 's'}.`
                     : `Selected files: ${selectedFileCount} files, ${selectedPageCount} total pages.`}
                 </span>
+              ) : knownPageCount > 0 ? (
+                <span>{selectedFileCount} files, {knownPageCount}+ pages (some files could not be read).</span>
               ) : (
-                <span>Page count unavailable for one or more selected files.</span>
+                <span>{selectedFileCount} {selectedFileCount === 1 ? 'file' : 'files'} selected.</span>
               )}
             </div>
           )}

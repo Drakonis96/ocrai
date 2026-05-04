@@ -68,7 +68,7 @@ const ALLOWED_IMAGE_MIME_TYPES = new Map([
 ]);
 const DEFAULT_METADATA_READ_RETRIES = 5;
 const DEFAULT_METADATA_READ_RETRY_DELAY_MS = 25;
-const DEFAULT_PDF_DOCUMENT_RASTERIZATION_CONCURRENCY = 1;
+const DEFAULT_PDF_DOCUMENT_RASTERIZATION_CONCURRENCY = 2;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 

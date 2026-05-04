@@ -69,7 +69,7 @@ const UploadView: React.FC<UploadViewProps> = ({
     targetLanguage: 'Español',
     customPrompt: '',
     removeReferences: true,
-    pagesPerBatch: 1,
+    pagesPerBatch: 15,
     maxRetries: 0,
   });
 
@@ -198,9 +198,9 @@ const UploadView: React.FC<UploadViewProps> = ({
 
   const selectedPageMetrics = selectedFiles.map((file) => selectedFileMetrics[getSelectedFileKey(file)]);
   const hasPendingPageCount = selectedPageMetrics.some((metric) => metric?.status === 'counting');
-  const totalSelectedPages = selectedPageMetrics.every((metric) => typeof metric?.pageCount === 'number')
-    ? selectedPageMetrics.reduce((total, metric) => total + (metric?.pageCount ?? 0), 0)
-    : null;
+  const knownPageSum = selectedPageMetrics.reduce((total, metric) => total + (typeof metric?.pageCount === 'number' ? metric.pageCount : 0), 0);
+  const hasUnknownPageCount = selectedPageMetrics.some((metric) => metric?.status === 'error');
+  const totalSelectedPages = hasUnknownPageCount ? null : knownPageSum;
 
   return (
     <div className="flex h-full min-h-0 flex-col transition-colors duration-200">
@@ -324,6 +324,7 @@ const UploadView: React.FC<UploadViewProps> = ({
                   showRetryOption
                   selectedFileCount={selectedFiles.length}
                   selectedPageCount={totalSelectedPages}
+                  knownPageCount={knownPageSum}
                   hasPendingPageCount={hasPendingPageCount}
                 />
               </div>

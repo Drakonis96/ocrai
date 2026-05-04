@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.5.0 - 2026-05-04
+
+### Changed
+- Default pages-per-batch is now 15 instead of 1 for faster Gemini processing out of the box.
+- Raised default OCR page-processing concurrency from 2 to 5 and PDF rasterization concurrency from 1 to 2 for smoother multi-document uploads.
+- Increased per-document PDF render concurrency from 2 to 4 pages for faster rasterization of large PDFs.
+
+### Fixed
+- Fixed "Page count unavailable" banner blocking the page summary when only some files fail client-side page counting — now shows a partial count with a note instead of hiding everything.
+
 ## v1.4.5 - 2026-05-04
 
 ### Added
