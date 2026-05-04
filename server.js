@@ -275,9 +275,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static files from the build directory
-app.use(express.static(path.join(__dirname, 'dist')));
-// Also serve public directory as fallback (useful if build didn't copy or for direct access)
+// Serve hashed assets (JS/CSS/images) with long-lived cache — filenames change on every build.
+app.use('/assets', express.static(path.join(__dirname, 'dist', 'assets'), {
+  maxAge: '1y',
+  immutable: true,
+}));
+
+// index.html must never be cached so browsers always get the latest entry-point.
+app.use(express.static(path.join(__dirname, 'dist'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  },
+}));
+
+// Also serve public directory as fallback.
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Ensure data directory exists
@@ -2171,10 +2186,14 @@ app.put('/api/labeling-settings', async (req, res) => {
   }
 });
 
-// Handle all other routes by serving the index.html (SPA support)
+// Handle all other routes by serving the index.html (SPA support).
+// Always send no-cache so browsers pick up the new entry-point after each deploy.
 app.get(/.*/, (req, res) => {
   const indexPath = path.join(__dirname, 'dist', 'index.html');
   if (fs.existsSync(indexPath)) {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(indexPath);
   } else {
     res.status(404).send('API Running. Frontend not built. Run `npm run build` to serve the app from this port, or use the Vite dev server.');

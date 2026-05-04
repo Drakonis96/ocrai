@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.3 - 2026-05-04
+
+### Fixed
+- Fixed browser caching of `index.html` that caused updates to be invisible after a Docker re-deploy. `index.html` is now served with `Cache-Control: no-cache` while hashed JS/CSS assets retain a long-lived cache for performance.
+
 ## v1.5.2 - 2026-05-04
 
 ### Added
