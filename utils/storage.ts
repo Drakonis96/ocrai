@@ -1,7 +1,34 @@
-import { FileSystemItem } from '../types';
+import { DocumentData, FileSystemItem } from '../types';
 
 // Use relative path so Vite proxy handles it in dev, and it works in prod (same origin)
 const API_BASE = '/api/documents';
+
+const isInlinePageImageUrl = (value: unknown): value is string =>
+  typeof value === 'string' && value.startsWith('data:');
+
+export const createSaveItemPayload = (item: FileSystemItem, startProcessing: boolean = false) => {
+  if (item.type !== 'file') {
+    return { ...item, startProcessing };
+  }
+
+  const document = item as DocumentData & { sourceFile?: { data?: string } };
+  const hasInlinePageImageData = document.pages.some((page) => isInlinePageImageUrl(page.imageUrl));
+  const hasUploadedSourceFile = typeof document.sourceFile?.data === 'string' && document.sourceFile.data.trim().length > 0;
+
+  if (hasInlinePageImageData || hasUploadedSourceFile) {
+    return { ...document, startProcessing };
+  }
+
+  return {
+    ...document,
+    startProcessing,
+    pages: document.pages.map((page, index) => ({
+      pageNumber: Number.isInteger(page.pageNumber) && page.pageNumber > 0 ? page.pageNumber : index + 1,
+      status: page.status,
+      errorDismissed: page.errorDismissed === true,
+    })),
+  };
+};
 
 export const getAllItems = async (): Promise<FileSystemItem[]> => {
   const response = await fetch(API_BASE);
@@ -12,7 +39,7 @@ export const getAllItems = async (): Promise<FileSystemItem[]> => {
 };
 
 export const saveItem = async (item: FileSystemItem, startProcessing: boolean = false): Promise<FileSystemItem> => {
-  const body = { ...item, startProcessing };
+  const body = createSaveItemPayload(item, startProcessing);
   const response = await fetch(API_BASE, {
     method: 'POST',
     headers: {

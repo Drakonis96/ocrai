@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.5.4 - 2026-05-04
+
+### Added
+- Added bounded client-side upload concurrency so multiple files can queue in parallel without flooding the browser with unbounded work.
+
+### Changed
+- Changed manual page reprocessing to queue work through the existing background document processor and let the editor poll document state until the selected page finishes.
+- Changed document save requests for existing files to send compact page payloads while the server merges them back into persisted page assets and OCR results.
+
+### Fixed
+- Fixed page-level reprocessing behind reverse proxies and CDNs so long OCR runs no longer fail with HTML `502 Bad Gateway` timeout pages.
+- Fixed document save flows so metadata edits on existing files do not clobber stored page images or OCR blocks when the client only needs to persist status and text changes.
+
+### Testing
+- Added regression coverage for bounded async upload concurrency and compact document save payloads.
+- Verified the automated suite and production build before release.
+
 ## v1.5.3 - 2026-05-04
 
 ### Fixed

@@ -52,6 +52,7 @@ import {
 } from './services/ocrSettingsService';
 import { cancelDocument, reprocessDocument } from './services/geminiService';
 import { downloadBlob } from './utils/download';
+import { runWithConcurrencyLimit } from './utils/asyncPool';
 // @ts-ignore
 import JSZip from 'jszip';
 
@@ -108,6 +109,7 @@ const collectDescendantItemIds = (sourceItems: FileSystemItem[], parentId: strin
 
 const getUploadFileKey = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 const PROCESSING_POLL_INTERVAL_MS = 1000;
+const MAX_CONCURRENT_UPLOADS = 4;
 
 const isDocumentInFlight = (doc: DocumentData) => doc.status === 'processing' || doc.status === 'uploading';
 
@@ -729,10 +731,11 @@ const App: React.FC = () => {
       let queuedDocumentCount = 0;
       const failedUploads: string[] = [];
 
-      for (const file of files) {
+      await runWithConcurrencyLimit(files, MAX_CONCURRENT_UPLOADS, async (file) => {
         if (uploadAbortedRef.current) {
-          break;
+          return;
         }
+
         const docId = `${MOCK_ID_PREFIX}${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         try {
           const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
@@ -829,7 +832,7 @@ const App: React.FC = () => {
               queuedDocumentCount += 1;
               setUploadSessionDocs((current) => current.map((entry) => (entry.id === recoveredDoc.id ? recoveredDoc : entry)));
               setCurrentView(AppView.DASHBOARD);
-              continue;
+              return;
             }
           } catch (refreshError) {
             console.error('Failed to refresh documents after upload error', refreshError);
@@ -846,7 +849,7 @@ const App: React.FC = () => {
               : entry
           )));
         }
-      }
+      });
 
       if (queuedDocumentCount > 0) {
         setCurrentView(AppView.DASHBOARD);

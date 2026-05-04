@@ -137,6 +137,84 @@ const normalizeUploadedSourceFile = (value) => {
   return { mimeType, data, name };
 };
 
+const hasOwn = (value, key) => Boolean(
+  value
+  && typeof value === 'object'
+  && Object.prototype.hasOwnProperty.call(value, key)
+);
+
+const isInlinePageImageUrl = (value) => typeof value === 'string' && value.startsWith('data:');
+
+const mergeExistingDocumentPages = (existingPages = [], incomingPages = []) => {
+  const safeExistingPages = Array.isArray(existingPages) ? existingPages : [];
+  const safeIncomingPages = Array.isArray(incomingPages) ? incomingPages : [];
+  const incomingPagesByNumber = new Map(
+    safeIncomingPages.map((page, index) => [getPageNumber(page, index + 1), page])
+  );
+  const seenPageNumbers = new Set();
+
+  const mergedPages = safeExistingPages.map((existingPage, index) => {
+    const pageNumber = getPageNumber(existingPage, index + 1);
+    const incomingPage = incomingPagesByNumber.get(pageNumber);
+    seenPageNumbers.add(pageNumber);
+
+    if (!incomingPage || typeof incomingPage !== 'object') {
+      return {
+        ...existingPage,
+        pageNumber,
+      };
+    }
+
+    return {
+      ...existingPage,
+      ...incomingPage,
+      pageNumber,
+      imageUrl: hasOwn(incomingPage, 'imageUrl')
+        ? (typeof incomingPage.imageUrl === 'string' ? incomingPage.imageUrl : '')
+        : (typeof existingPage?.imageUrl === 'string' ? existingPage.imageUrl : ''),
+      blocks: hasOwn(incomingPage, 'blocks') && Array.isArray(incomingPage.blocks)
+        ? incomingPage.blocks
+        : (Array.isArray(existingPage?.blocks) ? existingPage.blocks : []),
+    };
+  });
+
+  safeIncomingPages.forEach((incomingPage, index) => {
+    if (!incomingPage || typeof incomingPage !== 'object') {
+      return;
+    }
+
+    const pageNumber = getPageNumber(incomingPage, index + 1);
+    if (seenPageNumbers.has(pageNumber)) {
+      return;
+    }
+
+    mergedPages.push({
+      ...incomingPage,
+      pageNumber,
+      imageUrl: hasOwn(incomingPage, 'imageUrl')
+        ? (typeof incomingPage.imageUrl === 'string' ? incomingPage.imageUrl : '')
+        : '',
+      blocks: hasOwn(incomingPage, 'blocks') && Array.isArray(incomingPage.blocks)
+        ? incomingPage.blocks
+        : [],
+    });
+  });
+
+  return mergedPages.sort((left, right) => getPageNumber(left, 1) - getPageNumber(right, 1));
+};
+
+const mergeExistingDocumentForSave = (existingItem, incomingItem) => {
+  if (existingItem?.type !== 'file' || incomingItem?.type !== 'file') {
+    return { ...existingItem, ...incomingItem };
+  }
+
+  return {
+    ...existingItem,
+    ...incomingItem,
+    pages: mergeExistingDocumentPages(existingItem.pages, incomingItem.pages),
+  };
+};
+
 const createPendingRasterizedPage = (pageNumber) => ({
   pageNumber,
   imageUrl: '',
@@ -1247,7 +1325,7 @@ async function processPageWithColumnSplitting({
   };
 }
 
-const { processDocumentBackground, resumePendingDocuments } = createDocumentProcessingManager({
+const { processDocumentBackground, resumePendingDocuments, isDocumentProcessing } = createDocumentProcessingManager({
   dataDir: DATA_DIR,
   resolveDocumentDir,
   blocksToMarkdown,
@@ -1451,6 +1529,10 @@ app.post('/api/reprocess-page', async (req, res) => {
       throw createPublicError(400, 'Invalid page index');
     }
 
+    if (isDocumentProcessing(safeDocId)) {
+      throw createPublicError(409, 'Document is already processing');
+    }
+
     const docDir = resolveDocumentDir(safeDocId);
     const metadataPath = path.join(docDir, 'metadata.json');
     
@@ -1467,22 +1549,14 @@ app.post('/api/reprocess-page', async (req, res) => {
         return res.status(404).json({ error: "Page not found" });
     }
 
-    // Find image file
     const filename = path.basename(page.imageUrl);
     const imagePath = path.join(docDir, filename);
-    
-    console.log(`Reprocessing page ${parsedPageIndex} for ${safeDocId}. Image path: ${imagePath}`);
 
     if (!fs.existsSync(imagePath)) {
          console.error(`Image file not found at ${imagePath} (DATA_DIR: ${DATA_DIR})`);
          return res.status(404).json({ error: 'Image file not found' });
     }
 
-    const imageBuffer = await fs.promises.readFile(imagePath);
-    const base64Image = imageBuffer.toString('base64');
-    const mimeType = path.extname(filename) === '.png' ? 'image/png' : 'image/jpeg';
-
-    console.log(`Calling OCR provider for reprocessing... Provider: ${normalizeOcrProvider(modelProvider || docData.ocrProvider)}, Model: ${modelName || 'default'}`);
     const nextProvider = normalizeOcrProvider(modelProvider || docData.ocrProvider);
     const nextProcessingMode = typeof processingMode === 'string'
       ? processingMode
@@ -1500,71 +1574,29 @@ app.post('/api/reprocess-page', async (req, res) => {
       ? splitColumns
       : (docData.splitColumns === true);
 
-    try {
-      const result = nextSplitColumns
-        ? await processPageWithColumnSplitting({
-            provider: nextProvider,
-            base64Image,
-            mimeType,
-            modelName,
-            processingMode: nextProcessingMode,
-            targetLanguage: nextTargetLanguage,
-            customPrompt: nextCustomPrompt,
-            removeReferences: nextRemoveReferences,
-          })
-        : await processPageWithProvider({
-            provider: nextProvider,
-            base64Image,
-            mimeType,
-            modelName,
-            processingMode: nextProcessingMode,
-            targetLanguage: nextTargetLanguage,
-            customPrompt: nextCustomPrompt,
-            removeReferences: nextRemoveReferences,
-          });
-      const { blocks, blankPage } = normalizeProcessPageResult(result);
+    console.log(`Queueing page ${parsedPageIndex + 1} for background reprocessing on ${safeDocId}. Provider: ${nextProvider}, Model: ${modelName || 'default'}`);
 
-      console.log(`OCR reprocessing successful. Blocks: ${blocks ? blocks.length : 0}`);
+    docData.modelUsed = modelName || docData.modelUsed || DEFAULT_MODEL_ID;
+    docData.ocrProvider = nextProvider;
+    docData.processingMode = nextProcessingMode;
+    docData.targetLanguage = nextTargetLanguage;
+    docData.customPrompt = nextCustomPrompt;
+    docData.removeReferences = nextRemoveReferences;
+    docData.splitColumns = nextSplitColumns;
+    docData.pages[parsedPageIndex].status = 'pending';
+    docData.pages[parsedPageIndex].errorDismissed = false;
+    docData.pages[parsedPageIndex].retryCount = 0;
+    docData.pages[parsedPageIndex].lastError = '';
+    docData.pages[parsedPageIndex].nextRetryAt = null;
+    docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
+    normalizeDocumentRuntimeState(docData);
+    await writeJsonFileAtomic(metadataPath, docData);
 
-      docData.modelUsed = modelName || docData.modelUsed || DEFAULT_MODEL_ID;
-      docData.ocrProvider = nextProvider;
-      docData.pages[parsedPageIndex].blocks = blocks;
-      docData.pages[parsedPageIndex].status = 'completed';
-      docData.pages[parsedPageIndex].blankPage = blankPage;
-      docData.pages[parsedPageIndex].errorDismissed = false;
-      docData.pages[parsedPageIndex].retryCount = 0;
-      docData.pages[parsedPageIndex].lastError = '';
-      docData.pages[parsedPageIndex].nextRetryAt = null;
-      docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
+    processDocumentBackground(safeDocId).catch((error) => {
+      console.error(`Background page reprocessing trigger failed for ${safeDocId}`, error);
+    });
 
-      const mdContent = blocksToMarkdown(blocks);
-      await fs.promises.writeFile(path.join(docDir, `page_${parsedPageIndex + 1}.md`), mdContent);
-
-      normalizeDocumentRuntimeState(docData);
-      await writeJsonFileAtomic(metadataPath, docData);
-
-      res.json({ blocks, blankPage });
-    } catch (error) {
-      docData.pages[parsedPageIndex].lastAttemptAt = Date.now();
-      docData.pages[parsedPageIndex].lastError = formatProcessingError(error);
-      docData.pages[parsedPageIndex].errorDismissed = false;
-      docData.pages[parsedPageIndex].retryCount = normalizeNonNegativeInteger(docData.pages[parsedPageIndex].retryCount, 0) + 1;
-      if (docData.pages[parsedPageIndex].status !== 'completed') {
-        docData.pages[parsedPageIndex].status = 'error';
-        docData.pages[parsedPageIndex].nextRetryAt = null;
-      }
-      normalizeDocumentRuntimeState(docData);
-      await writeJsonFileAtomic(metadataPath, docData);
-      if (!error?.expose) {
-        const publicError = createPublicError(
-          Number.isInteger(error?.statusCode) ? error.statusCode : 502,
-          formatProcessingError(error)
-        );
-        publicError.cause = error;
-        throw publicError;
-      }
-      throw error;
-    }
+    res.status(202).json({ accepted: true });
 
   } catch (error) {
     handleRouteError(res, 'Reprocess error', error, 'Reprocessing failed');
@@ -1842,6 +1874,7 @@ app.post('/api/documents', async (req, res) => {
     }
 
     const docDir = resolveDocumentDir(item.id);
+    const metadataPath = path.join(docDir, 'metadata.json');
     if (!fs.existsSync(docDir)) {
       await fs.promises.mkdir(docDir, { recursive: true });
     }
@@ -1857,6 +1890,18 @@ app.post('/api/documents', async (req, res) => {
         || uploadedSourceFile.name.toLowerCase().endsWith('.pdf')
         || item.name.toLowerCase().endsWith('.pdf')
       );
+    const incomingPages = item.type === 'file' && Array.isArray(item.pages) ? item.pages : [];
+    const incomingPagesByNumber = new Map(
+      incomingPages.map((page, index) => [getPageNumber(page, index + 1), page])
+    );
+    const hasInlinePageImageData = incomingPages.some((page) => isInlinePageImageUrl(page?.imageUrl));
+
+    if (item.type === 'file' && fs.existsSync(metadataPath) && !uploadedSourceFile && !hasInlinePageImageData) {
+      const existingItem = await readJsonFileWithRetry(metadataPath);
+      if (existingItem?.type === 'file') {
+        item = mergeExistingDocumentForSave(existingItem, item);
+      }
+    }
 
     if (item.type === 'file' && isUploadedPdf) {
       const pdfBuffer = Buffer.from(uploadedSourceFile.data, 'base64');
@@ -1885,11 +1930,12 @@ app.post('/api/documents', async (req, res) => {
       for (let i = 0; i < item.pages.length; i++) {
         const page = item.pages[i];
         const pageNumber = getPageNumber(page, i + 1);
+        const incomingPage = incomingPagesByNumber.get(pageNumber);
         item.pages[i].pageNumber = pageNumber;
         
         // If imageUrl is base64, save it to file and update URL
-        if (page.imageUrl && page.imageUrl.startsWith('data:')) {
-          const matches = page.imageUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (isInlinePageImageUrl(incomingPage?.imageUrl)) {
+          const matches = incomingPage.imageUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
           if (matches && matches.length === 3) {
             const mimeType = matches[1];
             const base64Data = matches[2];
@@ -1910,7 +1956,7 @@ app.post('/api/documents', async (req, res) => {
         }
         
         // Save markdown if completed
-        if (page.status === 'completed' && page.blocks) {
+        if (incomingPage?.status === 'completed' && Array.isArray(incomingPage.blocks)) {
           const mdContent = blocksToMarkdown(page.blocks);
           await fs.promises.writeFile(
             path.join(docDir, `page_${pageNumber}.md`),
@@ -1944,7 +1990,7 @@ app.post('/api/documents', async (req, res) => {
     }
 
     // Save metadata (now with URLs instead of base64)
-    await writeJsonFileAtomic(path.join(docDir, 'metadata.json'), item);
+  await writeJsonFileAtomic(metadataPath, item);
 
     // Trigger background processing if requested
     if (isUploadedPdf) {

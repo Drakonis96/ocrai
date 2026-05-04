@@ -206,14 +206,7 @@ describe('Editor header layout', () => {
       '(max-width: 1279px)': false,
     });
 
-    reprocessPageMock.mockResolvedValue([
-      {
-        id: 'block-1',
-        text: 'Texto reprocesado',
-        label: BlockLabel.MAIN_TEXT,
-        box_2d: [0, 0, 1, 1],
-      },
-    ]);
+    reprocessPageMock.mockResolvedValue(undefined);
 
     const translatedDoc: DocumentData = {
       ...buildDocument('translated.pdf'),
@@ -224,6 +217,26 @@ describe('Editor header layout', () => {
       removeReferences: false,
       splitColumns: true,
     };
+    const onRefreshDocument = vi.fn(async () => ({
+      ...translatedDoc,
+      pages: translatedDoc.pages.map((page, pageIndex) => (
+        pageIndex === 0
+          ? {
+              ...page,
+              blocks: [
+                {
+                  id: 'block-1',
+                  text: 'Texto reprocesado',
+                  label: BlockLabel.MAIN_TEXT,
+                  box_2d: [0, 0, 1, 1],
+                },
+              ],
+              status: 'completed',
+              lastError: '',
+            }
+          : page
+      )),
+    }));
 
     await act(async () => {
       root.render(
@@ -231,7 +244,7 @@ describe('Editor header layout', () => {
           doc={translatedDoc}
           onBack={vi.fn()}
           onPersistDocument={vi.fn(async (doc) => doc)}
-          onRefreshDocument={vi.fn(async () => null)}
+          onRefreshDocument={onRefreshDocument}
           models={[
             {
               id: 'doc-model',
@@ -274,6 +287,7 @@ describe('Editor header layout', () => {
       false,
       true
     );
+    expect(onRefreshDocument).toHaveBeenCalledWith('doc-long-name');
   });
 
   it('retries failed page reprocessing the selected number of times and shows the final error', async () => {

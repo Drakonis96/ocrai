@@ -22,7 +22,7 @@ const createTextResponse = (body: string, status = 200) => ({
 
 describe('geminiService reprocessPage', () => {
   beforeEach(() => {
-    globalThis.fetch = vi.fn(async () => createJsonResponse({ blocks: [] }));
+    globalThis.fetch = vi.fn(async () => createJsonResponse({ accepted: true }, 202));
   });
 
   it('includes splitColumns in the page reprocess request payload', async () => {
@@ -40,7 +40,7 @@ describe('geminiService reprocessPage', () => {
         false,
         true
       )
-    ).resolves.toEqual([]);
+    ).resolves.toBeUndefined();
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/reprocess-page',

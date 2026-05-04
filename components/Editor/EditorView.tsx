@@ -44,6 +44,10 @@ type ReprocessScope = 'current' | 'issues';
 const MIN_EDITOR_WIDTH = 30;
 const MAX_EDITOR_WIDTH = 70;
 const DEFAULT_REPROCESS_RETRIES = 0;
+const REPROCESS_POLL_INTERVAL_MS = 1_000;
+const REPROCESS_POLL_TIMEOUT_MS = 5 * 60 * 1_000;
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, Math.max(0, ms)));
 
 interface ReprocessFailureDetail {
   pageNumber: number;
@@ -469,37 +473,27 @@ const EditorView: React.FC<EditorViewProps> = ({
     setCleanText(getDisplayedText(nextDoc, showFullDocument, nextActivePage, selectedLabels, overrides));
   };
 
-  const applyReprocessedPage = (
-    sourceDoc: DocumentData,
-    sourceOverrides: Record<number, string>,
-    pageIndex: number,
-    blocks: TextBlock[]
-  ) => {
-    const nextOverrides = { ...sourceOverrides };
-    delete nextOverrides[pageIndex];
+  const waitForReprocessedPageCompletion = async (docId: string, pageIndex: number) => {
+    const startedAt = Date.now();
 
-    const nextPages = sourceDoc.pages.map((page, currentPageIndex) => (
-      currentPageIndex === pageIndex
-        ? {
-            ...page,
-            blocks,
-            status: 'completed' as const,
-            errorDismissed: false,
-            retryCount: 0,
-            lastError: '',
-            nextRetryAt: null,
-            lastAttemptAt: Date.now(),
-          }
-        : page
-    ));
+    while (Date.now() - startedAt <= REPROCESS_POLL_TIMEOUT_MS) {
+      const refreshedDoc = await onRefreshDocument(docId);
+      const refreshedPage = refreshedDoc?.pages?.[pageIndex];
 
-    return {
-      nextDoc: {
-        ...sourceDoc,
-        pages: nextPages,
-      },
-      nextOverrides,
-    };
+      if (refreshedDoc && refreshedPage) {
+        if (refreshedPage.status === 'completed') {
+          return refreshedDoc;
+        }
+
+        if (refreshedPage.status === 'error') {
+          throw new Error(refreshedPage.lastError?.trim() || `Failed to reprocess page ${pageIndex + 1}`);
+        }
+      }
+
+      await sleep(REPROCESS_POLL_INTERVAL_MS);
+    }
+
+    throw new Error(`Timed out waiting for page ${pageIndex + 1} to finish reprocessing.`);
   };
 
   const handleToggleErrorDismissed = async (dismissed: boolean) => {
@@ -585,7 +579,7 @@ const EditorView: React.FC<EditorViewProps> = ({
           });
 
           try {
-            const newBlocks = await reprocessPage(
+            await reprocessPage(
               docId,
               pageIndex,
               reprocessOptions.model,
@@ -597,13 +591,14 @@ const EditorView: React.FC<EditorViewProps> = ({
               reprocessOptions.splitColumns
             );
 
-            const updatedState = applyReprocessedPage(nextDoc, nextOverrides, pageIndex, newBlocks);
-            nextDoc = updatedState.nextDoc;
-            nextOverrides = updatedState.nextOverrides;
+            const refreshedDoc = await waitForReprocessedPageCompletion(docId, pageIndex);
+            nextDoc = refreshedDoc;
+            nextOverrides = { ...nextOverrides };
+            delete nextOverrides[pageIndex];
             successfulPages += 1;
             pageCompleted = true;
             setPageTextOverrides(nextOverrides);
-            applyRefreshedDocumentState(nextDoc, nextOverrides, pageIndex);
+            applyRefreshedDocumentState(refreshedDoc, nextOverrides, pageIndex);
             break;
           } catch (error: any) {
             console.error(

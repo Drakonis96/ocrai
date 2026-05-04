@@ -62,7 +62,7 @@ const createReprocessPageError = (
   return error;
 };
 
-const parseReprocessPageResponse = async (response: Response): Promise<{ blocks?: unknown[]; blankPage?: boolean }> => {
+const parseReprocessPageResponse = async (response: Response): Promise<Record<string, unknown> | null> => {
   const rawBody = await response.text();
   const payload = parseJsonPayload(rawBody);
 
@@ -232,7 +232,7 @@ const reprocessPage = async (
   customPrompt?: string,
   removeReferences?: boolean,
   splitColumns?: boolean
-): Promise<TextBlock[]> => {
+): Promise<void> => {
   try {
     const response = await fetch('/api/reprocess-page', {
       method: 'POST',
@@ -251,17 +251,7 @@ const reprocessPage = async (
         splitColumns
       }),
     });
-    const data = await parseReprocessPageResponse(response);
-    
-    // Add unique IDs to blocks for React keys
-    const blocksWithIds = (data.blocks || []).map((b: any) => ({
-      ...b,
-      id: crypto.randomUUID(),
-      // Ensure boxes are present even if model omits them
-      box_2d: b.box_2d || [0, 0, 0, 0] 
-    }));
-
-    return blocksWithIds;
+    await parseReprocessPageResponse(response);
 
   } catch (error: any) {
     console.error("Gemini Service Error:", error);
