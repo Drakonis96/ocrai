@@ -34,3 +34,4 @@ coverage
 # Local documents and generated app data
 data/
 documento_prueba.pdf
+.claude/worktrees/elastic-yonath-2e9b8e/
